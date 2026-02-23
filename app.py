@@ -3,7 +3,16 @@ from cryptography.fernet import Fernet
 import hashlib, time, uuid, base64, json
 
 # =====================================================
-# CONFIG GEN-Z GABON
+# SAFE JSON SERIALIZATION
+# =====================================================
+def encode_fragments(frags):
+    return [base64.b64encode(f).decode("utf-8") for f in frags]
+
+def decode_fragments(frags):
+    return [base64.b64decode(f.encode("utf-8")) for f in frags]
+
+# =====================================================
+# CONFIG
 # =====================================================
 st.set_page_config(
     page_title="GEN-Z GABON • FREE-KONGOSSA V16",
@@ -12,15 +21,14 @@ st.set_page_config(
 )
 
 # =====================================================
-# NODE DATABASE (SOVEREIGN NODE)
+# NODE DATABASE
 # =====================================================
 @st.cache_resource
 def NODE():
     return {
         "TUNNELS": {},
         "CHAIN": {},
-        "PRESENCE": {},
-        "PUBLIC": []
+        "PRESENCE": {}
     }
 
 NODE = NODE()
@@ -57,7 +65,7 @@ class SOVEREIGN:
         return f.decrypt(b"".join(frags))
 
 # =====================================================
-# SESSION GEN-Z
+# SESSION
 # =====================================================
 if "uid" not in st.session_state:
     nick=st.text_input("Pseudo GEN-Z 🇬🇦")
@@ -66,11 +74,7 @@ if "uid" not in st.session_state:
         st.rerun()
     st.stop()
 
-# =====================================================
-# AUTH TUNNEL
-# =====================================================
 secret=st.text_input("Code Tunnel",type="password")
-
 if not secret:
     st.stop()
 
@@ -85,23 +89,17 @@ if sid not in NODE["TUNNELS"]:
 # =====================================================
 now=time.time()
 NODE["PRESENCE"][st.session_state.uid]=now
-NODE["PRESENCE"]={
-u:t for u,t in NODE["PRESENCE"].items()
-if now-t<30
-}
-
-active=len(NODE["PRESENCE"])
+NODE["PRESENCE"]={u:t for u,t in NODE["PRESENCE"].items() if now-t<30}
 
 st.title("🇬🇦 FREE-KONGOSSA — SOVEREIGN")
-
-st.caption(f"🟢 {active} actifs | Node Local")
+st.caption(f"🟢 {len(NODE['PRESENCE'])} actifs")
 
 # =====================================================
 # DISPLAY
 # =====================================================
 for m in reversed(NODE["TUNNELS"][sid]):
     try:
-        raw=SOVEREIGN.decrypt(secret,m["f"])
+        raw=SOVEREIGN.decrypt(secret,decode_fragments(m["f"]))
         st.caption(m["u"])
 
         if m["t"]=="text":
@@ -131,7 +129,7 @@ def push(data,typ):
 
     NODE["TUNNELS"][sid].append({
         "u":st.session_state.uid,
-        "f":frags,
+        "f":encode_fragments(frags),
         "t":typ,
         "ts":time.time()
     })
@@ -155,12 +153,13 @@ elif mode=="Vocal":
         st.rerun()
 
 # =====================================================
-# SOVEREIGN SYNC EXPORT
+# SYNC EXPORT / IMPORT
 # =====================================================
 st.divider()
 st.subheader("🌐 Sync Souverain")
 
-export_data=json.dumps(NODE["TUNNELS"][sid])
+export_data=json.dumps(NODE["TUNNELS"][sid],ensure_ascii=False,indent=2)
+
 st.download_button(
     "⬇️ Export Tunnel",
     export_data,
@@ -170,13 +169,10 @@ st.download_button(
 imp=st.file_uploader("Importer Sync")
 
 if imp:
-    incoming=json.load(imp)
+    incoming=json.loads(imp.read().decode("utf-8"))
     NODE["TUNNELS"][sid].extend(incoming)
     st.success("Fusion Node OK")
     st.rerun()
 
-# =====================================================
-# REFRESH ADAPTATIF
-# =====================================================
 time.sleep(4)
 st.rerun()
