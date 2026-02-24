@@ -1,243 +1,207 @@
 import streamlit as st
-import requests
-import uuid
-import json
-import time
+import uuid, time, json, base64, requests
 
 # =====================================================
-# V19 NODE NETWORK — AUTO SYNC + SUBSCRIPTIONS
+# CONFIG
 # =====================================================
 
-st.set_page_config(page_title="TTU Node V19", layout="wide")
+st.set_page_config(
+    page_title="GEN-Z GABON • V20",
+    page_icon="🇬🇦",
+    layout="centered"
+)
 
-# -----------------------------
-# SAFE JSON HELPERS
-# -----------------------------
+SYNC_INTERVAL = 6
 
-def now():
-    return float(time.time())
+# =====================================================
+# SAFE JSON
+# =====================================================
 
-def safe_json(data):
-    """Guarantee JSON serializable"""
-    return json.loads(json.dumps(data))
+def safe(obj):
+    return json.loads(json.dumps(obj))
 
+def b64e(b):
+    return base64.b64encode(b).decode()
 
-# -----------------------------
-# INIT NODE
-# -----------------------------
+def b64d(s):
+    return base64.b64decode(s.encode())
+
+# =====================================================
+# NODE INIT
+# =====================================================
 
 if "NODE" not in st.session_state:
-
     st.session_state.NODE = {
-        "ID": str(uuid.uuid4()),
-        "CREATED": now(),
-        "TUNNELS": {},
-        "SUBSCRIPTIONS": {},   # nodes we follow
-        "LAST_SYNC": 0.0
+        "ID": uuid.uuid4().hex[:8],
+        "TUNNELS": {"public":{"version":0,"messages":[]}},
+        "SUBS": {},
+        "LAST_SYNC": 0,
+        "PUBLIC": False
     }
 
 NODE = st.session_state.NODE
 
+BASE_URL = st.query_params.get("base","LOCAL")
 
-# -----------------------------
-# CREATE TUNNEL
-# -----------------------------
+# =====================================================
+# AUTO SUBSCRIBE VIA LINK
+# =====================================================
 
-def create_tunnel():
+if "node" in st.query_params:
+    nid = st.query_params["node"]
+    url = st.query_params.get("url","")
+    if nid and url:
+        NODE["SUBS"][nid]=url
 
-    tid = str(uuid.uuid4())
+# =====================================================
+# API MODE
+# =====================================================
 
-    NODE["TUNNELS"][tid] = {
-        "id": tid,
-        "created": now(),
-        "messages": [],
-        "version": 1
-    }
-
-
-# -----------------------------
-# ADD MESSAGE
-# -----------------------------
-
-def add_message(tid, msg):
-
-    tunnel = NODE["TUNNELS"][tid]
-
-    tunnel["messages"].append({
-        "msg": msg,
-        "time": now()
-    })
-
-    tunnel["version"] += 1
-
-
-# -----------------------------
-# MERGE TUNNELS (AUTO FUSION)
-# -----------------------------
-
-def merge_tunnels(remote):
-
-    for tid, rtunnel in remote.items():
-
-        if tid not in NODE["TUNNELS"]:
-            NODE["TUNNELS"][tid] = safe_json(rtunnel)
-            continue
-
-        local = NODE["TUNNELS"][tid]
-
-        if rtunnel["version"] > local["version"]:
-            NODE["TUNNELS"][tid] = safe_json(rtunnel)
-
-
-# -----------------------------
-# SUBSCRIBE NODE
-# -----------------------------
-
-def subscribe_node(url):
-
-    NODE["SUBSCRIPTIONS"][url] = {
-        "url": url,
-        "added": now(),
-        "last_seen": 0.0
-    }
-
-
-# -----------------------------
-# FETCH REMOTE NODE
-# -----------------------------
-
-def fetch_remote(url):
-
-    try:
-        r = requests.get(url + "?api=state", timeout=3)
-
-        if r.status_code == 200:
-            return r.json()
-
-    except:
-        pass
-
-    return None
-
-
-# -----------------------------
-# AUTO SYNC ENGINE
-# -----------------------------
-
-def auto_sync():
-
-    if now() - NODE["LAST_SYNC"] < 5:
-        return
-
-    for url in list(NODE["SUBSCRIPTIONS"].keys()):
-
-        data = fetch_remote(url)
-
-        if not data:
-            continue
-
-        merge_tunnels(data["TUNNELS"])
-
-        NODE["SUBSCRIPTIONS"][url]["last_seen"] = now()
-
-    NODE["LAST_SYNC"] = now()
-
-
-# -----------------------------
-# API MODE (NODE EXPORT)
-# -----------------------------
-
-query = st.query_params
-
-if "api" in query and query["api"] == "state":
-
-    st.json(safe_json({
-        "ID": NODE["ID"],
-        "TUNNELS": NODE["TUNNELS"]
+if st.query_params.get("api")=="state":
+    st.json(safe({
+        "ID":NODE["ID"],
+        "TUNNELS":NODE["TUNNELS"]
     }))
-
     st.stop()
 
+# =====================================================
+# SYNC ENGINE
+# =====================================================
 
-# -----------------------------
-# AUTO SYNC LOOP
-# -----------------------------
+def merge(remote):
+    for t,data in remote.items():
+        if t not in NODE["TUNNELS"]:
+            NODE["TUNNELS"][t]=data
+        else:
+            if data["version"]>NODE["TUNNELS"][t]["version"]:
+                NODE["TUNNELS"][t]=data
+
+def auto_sync():
+    now=time.time()
+    if now-NODE["LAST_SYNC"]<SYNC_INTERVAL:
+        return
+
+    for nid,url in list(NODE["SUBS"].items()):
+        try:
+            r=requests.get(url+"?api=state",timeout=3)
+            data=r.json()
+            merge(data["TUNNELS"])
+        except:
+            pass
+
+    NODE["LAST_SYNC"]=now
 
 auto_sync()
-
 
 # =====================================================
 # UI
 # =====================================================
 
-st.title("🌐 TTU NODE V19 — Sovereign Network")
+st.title("🇬🇦 GEN-Z GABON — V20")
 
-st.markdown("Node ID:")
-st.code(NODE["ID"])
+tabs=st.tabs(["💬 Signaux","➕ Nouveau signal","🌐 Nodes","👤 Mon node"])
 
+# =====================================================
+# SIGNaux
+# =====================================================
 
-# -----------------------------
-# CREATE TUNNEL
-# -----------------------------
+with tabs[0]:
 
-if st.button("➕ Create Tunnel"):
-    create_tunnel()
+    msgs=NODE["TUNNELS"]["public"]["messages"]
 
+    for m in reversed(msgs):
 
-# -----------------------------
-# SUBSCRIBE UI
-# -----------------------------
+        st.caption(m["user"])
 
-st.subheader("🔗 Subscribe to another Node")
+        if m["type"]=="text":
+            st.write(m["data"])
 
-url = st.text_input(
-    "Node URL (Streamlit app link)",
-    placeholder="https://xxxxx.streamlit.app"
-)
+        elif m["type"]=="image":
+            st.image(b64d(m["data"]))
 
-if st.button("Subscribe") and url:
-    subscribe_node(url)
+        elif m["type"]=="audio":
+            st.audio(b64d(m["data"]))
 
+# =====================================================
+# NOUVEAU SIGNAL (UX V16)
+# =====================================================
 
-# -----------------------------
-# SHOW SUBSCRIPTIONS
-# -----------------------------
+with tabs[1]:
 
-st.subheader("📡 Subscriptions")
-
-for u, info in NODE["SUBSCRIPTIONS"].items():
-    st.write(
-        f"✅ {u} | last seen: "
-        f"{round(now()-info['last_seen'],1)}s ago"
+    mode=st.radio(
+        "Type",
+        ["Texte","Image","Vocal"],
+        horizontal=True
     )
 
+    def push(data,typ):
+        t=NODE["TUNNELS"]["public"]
+        t["version"]+=1
+        t["messages"].append({
+            "id":uuid.uuid4().hex,
+            "user":NODE["ID"],
+            "type":typ,
+            "data":data,
+            "ts":time.time()
+        })
 
-# -----------------------------
-# DISPLAY TUNNELS
-# -----------------------------
-
-st.subheader("🧠 Tunnels")
-
-for tid, tunnel in NODE["TUNNELS"].items():
-
-    with st.expander(f"Tunnel {tid[:8]} | v{tunnel['version']}"):
-
-        for m in tunnel["messages"]:
-            st.write("•", m["msg"])
-
-        msg = st.text_input(
-            "Message",
-            key=f"msg_{tid}"
-        )
-
-        if st.button("Send", key=f"send_{tid}"):
-            add_message(tid, msg)
+    if mode=="Texte":
+        txt=st.text_area("Message")
+        if st.button("Envoyer"):
+            push(txt,"text")
             st.rerun()
 
+    elif mode=="Image":
+        f=st.file_uploader("Image")
+        if f and st.button("Envoyer image"):
+            push(b64e(f.getvalue()),"image")
+            st.rerun()
 
-# -----------------------------
-# DEBUG PANEL
-# -----------------------------
+    elif mode=="Vocal":
+        a=st.audio_input("Micro")
+        if a and st.button("Envoyer vocal"):
+            push(b64e(a.getvalue()),"audio")
+            st.rerun()
 
-with st.expander("⚙️ Debug State"):
-    st.json(safe_json(NODE))
+# =====================================================
+# NODES
+# =====================================================
+
+with tabs[2]:
+
+    st.subheader("S'abonner à un node")
+
+    url=st.text_input("URL du node")
+
+    if st.button("S'abonner"):
+        nid=uuid.uuid4().hex[:6]
+        NODE["SUBS"][nid]=url
+        st.success("Node ajouté ✅")
+
+    st.divider()
+
+    st.subheader("Nodes suivis")
+
+    for nid,url in NODE["SUBS"].items():
+        st.write(f"🟢 {nid} → {url}")
+
+# =====================================================
+# MON NODE
+# =====================================================
+
+with tabs[3]:
+
+    st.write("ID Node :",NODE["ID"])
+
+    share_link=f"?node={NODE['ID']}&url={BASE_URL}"
+
+    st.code(share_link)
+
+    st.caption("Partage ce lien pour que quelqu’un s’abonne automatiquement.")
+
+# =====================================================
+# AUTO REFRESH
+# =====================================================
+
+time.sleep(4)
+st.rerun()
