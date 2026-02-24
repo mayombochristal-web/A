@@ -1,6 +1,7 @@
 import streamlit as st
 from cryptography.fernet import Fernet
-import hashlib, time, uuid, base64, json, math
+from streamlit_webrtc import webrtc_streamer, WebRtcMode
+import hashlib, time, uuid, base64, math
 
 # =====================================================
 # CONFIG
@@ -18,23 +19,14 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-.stApp {background:#0e1117;color:white;}
-
-.status-box{
-padding:10px;border-radius:10px;
-border:1px solid #00ff88;
-background:#001a00;text-align:center;font-weight:bold;
-}
-
-.msg-box{
-padding:15px;border-radius:15px;background:#1e1e1e;
-margin-bottom:10px;border-left:5px solid #2e7d32;
-}
+.stApp{background:#0e1117;color:white;}
+.msg{background:#1e1e1e;padding:10px;
+border-radius:10px;margin-bottom:8px;}
 </style>
-""", unsafe_allow_html=True)
+""",unsafe_allow_html=True)
 
 # =====================================================
-# TTU ENGINE
+# TTU ENGINE (ADAPTIVE TIME)
 # =====================================================
 
 def ttu_update(rho,tick):
@@ -47,15 +39,19 @@ def ttu_update(rho,tick):
     gamma=math.exp(-4*phi)
 
     if phi<0.3:
-        phase="😴 Calme"
+        phase="😴 CALME"
+        refresh=7
     elif phi<0.6:
-        phase="🟢 Actif"
+        phase="🟢 ACTIF"
+        refresh=4
     elif phi<0.85:
-        phase="⚡ Chaud"
+        phase="⚡ CHAUD"
+        refresh=2
     else:
         phase="🔥 VIRAL"
+        refresh=1
 
-    return phi,gamma,phase,K
+    return phi,gamma,phase,K,refresh
 
 # =====================================================
 # CRYPTO
@@ -76,26 +72,21 @@ class SOVEREIGN:
 
     @staticmethod
     def encrypt(secret,data):
-        f=Fernet(SOVEREIGN.key(secret))
-        c=f.encrypt(data)
-        n=len(c)
-        return [
-            base64.b64encode(c[:n//3]).decode(),
-            base64.b64encode(c[n//3:2*n//3]).decode(),
-            base64.b64encode(c[2*n//3:]).decode()
-        ]
+        return base64.b64encode(
+            Fernet(SOVEREIGN.key(secret)).encrypt(data)
+        ).decode()
 
     @staticmethod
-    def decrypt(secret,frags):
+    def decrypt(secret,data):
         try:
-            f=Fernet(SOVEREIGN.key(secret))
-            combined=b"".join(base64.b64decode(x) for x in frags)
-            return f.decrypt(combined)
+            return Fernet(
+                SOVEREIGN.key(secret)
+            ).decrypt(base64.b64decode(data))
         except:
             return None
 
 # =====================================================
-# GLOBAL NODE
+# GLOBAL NODE (ANTI CRASH MEMORY)
 # =====================================================
 
 @st.cache_resource
@@ -104,28 +95,27 @@ def get_node():
         "TUNNELS":{},
         "PRESENCE":{},
         "TTU":{},
-        "LIVE":{},
-        "LAST_TICK":time.time()
+        "LIVE":{}
     }
 
 NODE=get_node()
 
 # =====================================================
-# SIDEBAR LOGIN
+# LOGIN UNIQUE PAGE
 # =====================================================
 
-st.sidebar.title("🇬🇦 GEN-Z GABON")
+st.sidebar.title("🇬🇦 FREE-KONGOSSA")
 
 pseudo=st.sidebar.text_input("Pseudo")
-secret=st.sidebar.text_input("Code Tunnel",type="password")
+secret=st.sidebar.text_input("Tunnel Secret",type="password")
 
-if st.sidebar.button("Entrer") and pseudo and secret:
-    st.session_state.uid=f"🇬🇦 {pseudo}#{uuid.uuid4().hex[:3]}"
+if st.sidebar.button("Connexion") and pseudo and secret:
+    st.session_state.uid=f"{pseudo}#{uuid.uuid4().hex[:3]}"
     st.session_state.secret=secret
     st.rerun()
 
 if "uid" not in st.session_state:
-    st.title("🔥 FREE-KONGOSSA")
+    st.title("GEN-Z GABON")
     st.stop()
 
 secret=st.session_state.secret
@@ -133,166 +123,109 @@ sid=SOVEREIGN.tunnel(secret)
 
 NODE["TUNNELS"].setdefault(sid,[])
 NODE["LIVE"].setdefault(sid,None)
-
-NODE["TTU"].setdefault(sid,{
-    "rho":0.2,"tick":0,"phi":0.5,"gamma":1,"phase":"Init"
-})
+NODE["TTU"].setdefault(sid,{"rho":0.2,"tick":0})
 
 TTU=NODE["TTU"][sid]
 
 # =====================================================
-# PRESENCE
+# PRESENCE TTL
 # =====================================================
 
 now=time.time()
 NODE["PRESENCE"][st.session_state.uid]={"ts":now,"sid":sid}
 
-active_now=[u for u,d in NODE["PRESENCE"].items()
-            if now-d["ts"]<30 and d["sid"]==sid]
+active=[u for u,d in NODE["PRESENCE"].items()
+        if now-d["ts"]<25 and d["sid"]==sid]
 
 # =====================================================
-# HORLOGE TTU
+# MESSAGE PUSH (BATCH SAFE)
 # =====================================================
 
-if now-NODE["LAST_TICK"]>3:
-    NODE["LAST_TICK"]=now
+def push(msg):
 
-    TTU["tick"]+=1
-    phi,gamma,phase,K=ttu_update(TTU["rho"],TTU["tick"])
+    NODE["TUNNELS"][sid].append({
+        "u":st.session_state.uid,
+        "d":SOVEREIGN.encrypt(secret,msg),
+        "ts":time.time()
+    })
 
-    TTU["phi"]=phi
-    TTU["gamma"]=gamma
-    TTU["phase"]=phase
+    # mémoire circulaire anti crash
+    NODE["TUNNELS"][sid]=NODE["TUNNELS"][sid][-150:]
 
-    TTU["rho"]=0.98*TTU["rho"]+0.02*(len(active_now)/5)
+    TTU["rho"]=min(1.2,TTU["rho"]+0.015)
 
 # =====================================================
 # UI
 # =====================================================
 
-st.title("🏠 Flux Souverain")
+st.title("🏠 GEN-Z GABON FREE-KONGOSSA")
+st.write(f"🟢 {len(active)} en ligne")
 
-st.markdown(
-f"<div class='status-box'>🟢 {len(active_now)} membres en ligne</div>",
-unsafe_allow_html=True)
+msg=st.text_input("Parler au tunnel")
 
-# =====================================================
-# PUSH
-# =====================================================
-
-def push(data,typ):
-
-    frags=SOVEREIGN.encrypt(secret,data)
-
-    NODE["TUNNELS"][sid].append({
-        "u":st.session_state.uid,
-        "f":frags,
-        "t":typ,
-        "ts":time.time()
-    })
-
-    NODE["TUNNELS"][sid]=NODE["TUNNELS"][sid][-300:]
-
-    TTU["rho"]=min(1.2,TTU["rho"]+0.03)
+if st.button("Envoyer"):
+    if msg:
+        push(msg.encode())
+        st.rerun()
 
 # =====================================================
-# PUBLICATION + LIVE
+# LIVE (DECOUPLÉ)
 # =====================================================
 
-with st.expander("➕ PUBLIER / LIVE",expanded=True):
+st.divider()
+st.subheader("🎥 LIVE")
 
-    tab1,tab2,tab3,tab4=st.tabs(
-        ["💬 Texte","📷 Caméra","🎤 Micro","🎥 LIVE"]
-    )
+ctx=webrtc_streamer(
+    key=f"live-{sid}",
+    mode=WebRtcMode.SENDRECV,
+    media_stream_constraints={"video":True,"audio":True},
+    async_processing=True,
+)
 
-    # TEXT
-    with tab1:
-        txt=st.text_area("Message")
-        if st.button("Envoyer texte"):
-            if txt:
-                push(txt.encode(),"text")
-                st.rerun()
-
-    # CAMERA
-    with tab2:
-        img=st.camera_input("Prendre photo")
-        file=st.file_uploader("ou télécharger",type=["png","jpg","mp4"])
-
-        if img and st.button("Publier photo"):
-            push(img.getvalue(),"image/jpeg")
-            st.rerun()
-
-        if file and st.button("Publier fichier"):
-            push(file.getvalue(),file.type)
-            st.rerun()
-
-    # MICRO
-    with tab3:
-        audio=st.audio_input("Enregistrer vocal")
-
-        if audio and st.button("Envoyer vocal"):
-            push(audio.getvalue(),"audio/wav")
-            st.rerun()
-
-    # LIVE MODE
-    with tab4:
-
-        if NODE["LIVE"][sid] is None:
-
-            if st.button("🔴 Démarrer LIVE"):
-                NODE["LIVE"][sid]=st.session_state.uid
-                st.rerun()
-
-        else:
-            st.warning(f"🔴 LIVE par {NODE['LIVE'][sid]}")
-
-            frame=st.camera_input("LIVE caméra")
-
-            if frame:
-                push(frame.getvalue(),"image/jpeg")
-
-            if st.button("⛔ Stop LIVE"):
-                NODE["LIVE"][sid]=None
-                st.rerun()
+if ctx.state.playing:
+    NODE["LIVE"][sid]=st.session_state.uid
+    TTU["rho"]+=0.005*len(active)
 
 # =====================================================
-# DASHBOARD TTU
+# TTU CLOCK
 # =====================================================
 
-with st.expander("🔥 État du Tunnel"):
-    st.progress(TTU["phi"])
-    st.metric("Phase",TTU["phase"])
+TTU["tick"]+=1
+
+phi,gamma,phase,K,refresh=ttu_update(
+    TTU["rho"],
+    TTU["tick"]
+)
+
+st.progress(phi)
+st.metric("État",phase)
+
+# dissipation naturelle
+TTU["rho"]*=0.996
 
 # =====================================================
-# FLUX
+# FLUX (RENDER LIMITÉ)
 # =====================================================
 
 for m in reversed(NODE["TUNNELS"][sid][-40:]):
 
-    raw=SOVEREIGN.decrypt(secret,m["f"])
+    raw=SOVEREIGN.decrypt(secret,m["d"])
 
     if raw:
+        st.markdown(f"**{m['u']}**")
         st.markdown(
-        f"**{m['u']}** • {time.strftime('%H:%M',time.localtime(m['ts']))}")
-
-        if m["t"]=="text":
-            st.markdown(
-            f"<div class='msg-box'>{raw.decode()}</div>",
-            unsafe_allow_html=True)
-        elif "image" in m["t"]:
-            st.image(raw)
-        elif "video" in m["t"]:
-            st.video(raw)
-        else:
-            st.audio(raw)
+            f"<div class='msg'>{raw.decode()}</div>",
+            unsafe_allow_html=True
+        )
 
 # =====================================================
-# REFRESH INTELLIGENT
+# ADAPTIVE REFRESH (ANTI 10K CRASH)
 # =====================================================
 
-if "refresh" not in st.session_state:
-    st.session_state.refresh=0
+if "last" not in st.session_state:
+    st.session_state.last=0
 
-if time.time()-st.session_state.refresh>5:
-    st.session_state.refresh=time.time()
+if time.time()-st.session_state.last>refresh:
+    st.session_state.last=time.time()
+    time.sleep(0.2)
     st.rerun()
