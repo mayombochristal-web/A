@@ -1,24 +1,33 @@
 import streamlit as st
-import uuid, time, json, base64, hashlib, requests
+import uuid, time, json, base64
 
 # =====================================================
 # CONFIG
 # =====================================================
 
 st.set_page_config(
-    page_title="GEN-Z ATTRACTOR",
+    page_title="GEN-Z SOCIAL V22",
     page_icon="🌍",
     layout="centered"
 )
 
-SYNC_DELAY = 5
+# =====================================================
+# GLOBAL SHARED STORE (STREAMLIT SAFE)
+# =====================================================
+
+@st.cache_resource
+def HUB():
+    return {
+        "users":{},
+        "posts":[],
+        "tunnels":{}
+    }
+
+HUB = HUB()
 
 # =====================================================
 # UTILS
 # =====================================================
-
-def safe(x):
-    return json.loads(json.dumps(x))
 
 def enc(b):
     return base64.b64encode(b).decode()
@@ -26,172 +35,78 @@ def enc(b):
 def dec(s):
     return base64.b64decode(s.encode())
 
-def dm_id(a,b):
-    return hashlib.sha256("".join(sorted([a,b])).encode()).hexdigest()[:16]
-
 # =====================================================
 # USER INIT
 # =====================================================
 
-if "USER" not in st.session_state:
+if "user" not in st.session_state:
 
-    name = st.text_input("Ton pseudo 🌟")
+    name = st.text_input("Choisis ton pseudo")
 
     if name:
-        st.session_state.USER={
+        st.session_state.user={
             "id":uuid.uuid4().hex[:8],
-            "name":name
+            "name":name,
+            "bio":"",
+            "photo":None,
+            "public":True,
+            "subs":[]
         }
         st.rerun()
 
     st.stop()
 
-USER=st.session_state.USER
+USER=st.session_state.user
 
 # =====================================================
-# NODE STATE
+# REGISTER USER
 # =====================================================
 
-if "NODE" not in st.session_state:
-    st.session_state.NODE={
-        "global":{"version":0,"messages":[]},
-        "dms":{},
-        "subs":{},
-        "discover":{},
-        "seen":set(),
-        "last_sync":0
-    }
-
-NODE=st.session_state.NODE
-
-BASE_URL = st.query_params.get("base","LOCAL")
-
-# =====================================================
-# API
-# =====================================================
-
-if st.query_params.get("api")=="state":
-    st.json(safe({
-        "user":USER,
-        "global":NODE["global"],
-        "dms":NODE["dms"]
-    }))
-    st.stop()
-
-# =====================================================
-# MERGE SAFE
-# =====================================================
-
-def add_msg(container,msg):
-    if msg["id"] in NODE["seen"]:
-        return
-    NODE["seen"].add(msg["id"])
-    container.append(msg)
-
-def merge(remote):
-
-    for m in remote["global"]["messages"]:
-        add_msg(NODE["global"]["messages"],m)
-
-    for tid,chat in remote["dms"].items():
-
-        if tid not in NODE["dms"]:
-            NODE["dms"][tid]=chat
-        else:
-            for m in chat["messages"]:
-                add_msg(NODE["dms"][tid]["messages"],m)
-
-# =====================================================
-# SYNC
-# =====================================================
-
-def sync():
-
-    now=time.time()
-    if now-NODE["last_sync"]<SYNC_DELAY:
-        return
-
-    for url in NODE["subs"].values():
-
-        try:
-            r=requests.get(url+"?api=state",timeout=3)
-            data=r.json()
-
-            NODE["discover"][data["user"]["id"]]={
-                "name":data["user"]["name"],
-                "url":url
-            }
-
-            merge(data)
-
-        except:
-            pass
-
-    NODE["last_sync"]=now
-
-sync()
-
-# =====================================================
-# SEND
-# =====================================================
-
-def post_global(text,typ,data):
-    msg={
-        "id":uuid.uuid4().hex,
-        "user":USER["name"],
-        "type":typ,
-        "data":data,
-        "ts":time.time()
-    }
-    add_msg(NODE["global"]["messages"],msg)
-
-def post_dm(target_id,text):
-
-    tid=dm_id(USER["id"],target_id)
-
-    if tid not in NODE["dms"]:
-        NODE["dms"][tid]={
-            "users":[USER["id"],target_id],
-            "messages":[]
-        }
-
-    msg={
-        "id":uuid.uuid4().hex,
-        "user":USER["name"],
-        "type":"text",
-        "data":text,
-        "ts":time.time()
-    }
-
-    add_msg(NODE["dms"][tid]["messages"],msg)
+HUB["users"][USER["id"]] = USER
 
 # =====================================================
 # UI
 # =====================================================
 
-st.title("🌍 GEN-Z ATTRACTOR")
+st.title("🌍 GEN-Z SOCIAL")
 
-tabs=st.tabs(["🏠 Global","➕ Publier","💬 Privé","👥 Découvrir","👤 Profil"])
+tabs=st.tabs([
+    "🏠 Accueil",
+    "➕ Publier",
+    "👥 Découvrir",
+    "🔒 Tunnels",
+    "👤 Profil"
+])
 
 # =====================================================
-# GLOBAL
+# ACCUEIL
 # =====================================================
 
 with tabs[0]:
 
-    feed=sorted(NODE["global"]["messages"],
-                key=lambda x:x["ts"],
-                reverse=True)
+    feed=[p for p in HUB["posts"]
+          if p["user"] in USER["subs"]
+          or p["user"]==USER["id"]]
 
-    for m in feed:
-        st.subheader(m["user"])
+    feed=sorted(feed,key=lambda x:x["ts"],reverse=True)
 
-        if m["type"]=="text":
-            st.write(m["data"])
-        elif m["type"]=="image":
-            st.image(dec(m["data"]))
-        elif m["type"]=="audio":
-            st.audio(dec(m["data"]))
+    if not feed:
+        st.info("Abonne-toi à quelqu’un dans Découvrir 👥")
+
+    for p in feed:
+
+        u=HUB["users"].get(p["user"],{})
+
+        st.subheader(u.get("name","?"))
+
+        if p["type"]=="text":
+            st.write(p["data"])
+
+        elif p["type"]=="image":
+            st.image(dec(p["data"]))
+
+        elif p["type"]=="audio":
+            st.audio(dec(p["data"]))
 
         st.divider()
 
@@ -201,91 +116,125 @@ with tabs[0]:
 
 with tabs[1]:
 
-    scope=st.radio("Visibilité",["Public 🌍","Privé 💬"])
+    visibility=st.radio("Visibilité",["Public","Privé"])
 
     mode=st.radio("Type",["Texte","Image","Vocal"],horizontal=True)
 
-    if scope=="Public 🌍":
+    def publish(data,typ):
+        HUB["posts"].append({
+            "id":uuid.uuid4().hex,
+            "user":USER["id"],
+            "type":typ,
+            "data":data,
+            "visibility":visibility,
+            "ts":time.time()
+        })
 
-        if mode=="Texte":
-            txt=st.text_area("Message")
-            if st.button("Publier"):
-                post_global(txt,"text",txt)
-                st.rerun()
+    if mode=="Texte":
+        txt=st.text_area("Exprime toi...")
+        if st.button("Publier"):
+            publish(txt,"text")
+            st.rerun()
 
-        elif mode=="Image":
-            f=st.file_uploader("Image")
-            if f and st.button("Publier image"):
-                post_global("", "image",enc(f.getvalue()))
-                st.rerun()
+    elif mode=="Image":
+        f=st.file_uploader("Image")
+        if f and st.button("Publier image"):
+            publish(enc(f.getvalue()),"image")
+            st.rerun()
 
-        elif mode=="Vocal":
-            a=st.audio_input("Vocal")
-            if a and st.button("Publier vocal"):
-                post_global("", "audio",enc(a.getvalue()))
-                st.rerun()
-
-    else:
-        st.info("Choisis une personne dans Privé 💬")
+    elif mode=="Vocal":
+        a=st.audio_input("Vocal")
+        if a and st.button("Publier vocal"):
+            publish(enc(a.getvalue()),"audio")
+            st.rerun()
 
 # =====================================================
-# DM
+# DECOUVRIR
 # =====================================================
 
 with tabs[2]:
 
-    if not NODE["discover"]:
-        st.info("Ajoute quelqu’un dans Découvrir.")
+    st.subheader("🌍 Utilisateurs visibles")
 
-    for uid,data in NODE["discover"].items():
+    for uid,u in HUB["users"].items():
 
-        st.subheader(data["name"])
+        if uid==USER["id"] or not u["public"]:
+            continue
 
-        tid=dm_id(USER["id"],uid)
+        col1,col2,col3=st.columns([4,1,1])
 
-        msgs=NODE["dms"].get(tid,{"messages":[]})["messages"]
+        with col1:
+            st.write("👤",u["name"])
 
-        for m in msgs:
-            st.write(f"{m['user']} : {m['data']}")
+        with col2:
+            if uid not in USER["subs"]:
+                if st.button("S'abonner",key=uid):
+                    USER["subs"].append(uid)
+                    st.rerun()
 
-        msg=st.text_input("Message",key=tid)
-
-        if st.button("Envoyer",key=tid+"btn"):
-            post_dm(uid,msg)
-            st.rerun()
-
-        st.divider()
+        with col3:
+            if uid in USER["subs"]:
+                if st.button("Se désabonner",key=uid+"un"):
+                    USER["subs"].remove(uid)
+                    st.rerun()
 
 # =====================================================
-# DISCOVER
+# TUNNELS
 # =====================================================
 
 with tabs[3]:
 
-    url=st.text_input("Ajouter un node")
+    name=st.text_input("Nom du tunnel")
 
-    if st.button("Suivre"):
-        NODE["subs"][uuid.uuid4().hex[:6]]=url
-        st.success("Abonné ✅")
+    if st.button("Créer tunnel"):
 
-    for d in NODE["discover"].values():
-        st.write("👤",d["name"])
+        tid=uuid.uuid4().hex[:6]
+
+        HUB["tunnels"][tid]={
+            "owner":USER["id"],
+            "members":[USER["id"]],
+            "messages":[]
+        }
+
+        st.success(f"Tunnel créé : {tid}")
+
+    st.divider()
+
+    for tid,t in HUB["tunnels"].items():
+
+        if USER["id"] in t["members"]:
+
+            st.subheader(f"Tunnel {tid}")
+
+            msg=st.text_input("Message",key=tid)
+
+            if st.button("Envoyer",key=tid+"send"):
+                t["messages"].append({
+                    "user":USER["name"],
+                    "text":msg
+                })
+                st.rerun()
+
+            for m in t["messages"]:
+                st.write(f"{m['user']} : {m['text']}")
 
 # =====================================================
-# PROFILE
+# PROFIL
 # =====================================================
 
 with tabs[4]:
 
-    st.subheader(USER["name"])
-    st.write("ID :",USER["id"])
+    st.subheader("Profil")
 
-    link=f"{BASE_URL}?node={USER['id']}&url={BASE_URL}"
-    st.code(link)
+    USER["bio"]=st.text_input("Bio",USER["bio"])
 
-# =====================================================
-# REFRESH
-# =====================================================
+    photo=st.file_uploader("Photo / Logo")
 
-time.sleep(4)
-st.rerun()
+    if photo:
+        USER["photo"]=enc(photo.getvalue())
+
+    USER["public"]=st.toggle("Profil public",USER["public"])
+
+    st.write("ID public :",USER["id"])
+
+    st.success("Profil mis à jour automatiquement ✅")
