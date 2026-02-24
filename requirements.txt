@@ -1,5 +1,3 @@
 streamlit
-cryptography
-streamlit-webrtc
-av
-aiortc
+streamlit-autorefresh
+pillow
