@@ -1,3 +1,9 @@
+# SAFE IMPORT WEBRTC
+try:
+    from streamlit_webrtc import webrtc_streamer, WebRtcMode
+    WEBRTC_AVAILABLE = True
+except:
+    WEBRTC_AVAILABLE = False
 import streamlit as st
 from cryptography.fernet import Fernet
 import hashlib, time, uuid, base64, json, math
