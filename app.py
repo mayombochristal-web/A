@@ -15,24 +15,21 @@ layout="wide",
 initial_sidebar_state="collapsed"
 )
 # =====================================================
-# DESIGN MODERNE & RASSURANT (Style Instagram/WhatsApp)
-# =====================================================
-st.markdown("""
-""", unsafe_allow_html=True)
-# =====================================================
 # MOTEUR QUANTIQUE (Caché en arrière-plan)
 # =====================================================
 @dataclass
 class QuantumState:
+"""État quantique du système (invisible pour l'utilisateur)"""
 Phi_M: float
 Phi_C: float
 Phi_D: float
 timestamp: float
 @property
 def health_score(self) -> float:
-"""Score de santé du système (0-100) - caché à l'utilisateur"""
+"""Score de santé du système (0-100)"""
 return min(100, (self.Phi_C / 0.95) * 100)
 class SOVEREIGN:
+"""Moteur cryptographique souverain"""
 @staticmethod
 def tunnel(secret: str) -> str:
 return hashlib.sha256(secret.encode()).hexdigest()[:16]
@@ -61,6 +58,7 @@ except:
 return None
 @st.cache_resource
 def get_network():
+"""Initialise le réseau global"""
 return {
 "FEEDS": {},
 "USERS": {},
@@ -68,6 +66,11 @@ return {
 "REACTIONS": {}
 }
 NETWORK = get_network()
+# =====================================================
+# DESIGN MODERNE & RASSURANT
+# =====================================================
+st.markdown("""
+""", unsafe_allow_html=True)
 # =====================================================
 # FONCTIONS UTILITAIRES
 # =====================================================
@@ -92,12 +95,8 @@ parts = name.split()
 if len(parts) >= 2:
 return (parts[0][0] + parts[-1][0]).upper()
 return name[:2].upper()
-def optimize_network(message_count: int, coherence: float) -> None:
-"""Optimisation silencieuse en arrière-plan"""
-# Ajustements quantiques invisibles
-pass
 # =====================================================
-# AUTHENTIFICATION MODERNE
+# AUTHENTIFICATION
 # =====================================================
 def show_auth_screen():
 st.markdown("""
@@ -119,7 +118,7 @@ st.session_state.joined = time.time()
 st.session_state.avatar_color = f"#{uuid.uuid4().hex[:6]}"
 st.rerun()
 with col_b:
-if st.button("🔑 Se connecter", use_container_width=True, type="secondary"):
+if st.button("🔑 Se connecter", use_container_width=True):
 if nickname:
 st.session_state.uid = f"{nickname}#{uuid.uuid4().hex[:3]}"
 st.session_state.display_name = nickname
@@ -132,7 +131,7 @@ if "uid" not in st.session_state:
 show_auth_screen()
 st.stop()
 # =====================================================
-# CONFIGURATION TUNNEL (Simplifié)
+# CONFIGURATION TUNNEL
 # =====================================================
 if "tunnel_setup" not in st.session_state:
 st.markdown("""
@@ -150,7 +149,6 @@ if len(secret) >= 4:
 st.session_state.secret = secret
 st.session_state.tunnel_id = SOVEREIGN.tunnel(secret)
 st.session_state.tunnel_setup = True
-# Init état quantique (invisible)
 if st.session_state.tunnel_id not in NETWORK["STATES"]:
 NETWORK["FEEDS"][st.session_state.tunnel_id] = []
 NETWORK["STATES"][st.session_state.tunnel_id] = QuantumState(
@@ -169,7 +167,6 @@ tunnel_id = st.session_state.tunnel_id
 secret = st.session_state.secret
 state = NETWORK["STATES"][tunnel_id]
 feed = NETWORK["FEEDS"][tunnel_id]
-# Mise à jour présence
 NETWORK["USERS"][st.session_state.uid] = {
 "ts": time.time(),
 "tunnel": tunnel_id,
@@ -180,16 +177,15 @@ u for u, d in NETWORK["USERS"].items()
 if time.time() - d["ts"] < 30 and d["tunnel"] == tunnel_id
 ]
 # =====================================================
-# HEADER PRINCIPAL
+# HEADER
 # =====================================================
 col_logo, col_search, col_user = st.columns([2, 4, 2])
 with col_logo:
-st.markdown("""
-""", unsafe_allow_html=True)
+st.markdown("<div class='logo'>🇬🇦 GEN-Z</div>", unsafe_allow_html=True)
 with col_search:
 search = st.text_input(
 "Rechercher...",
-placeholder="🔍 Rechercher un post ou un ami",
+placeholder="🔍 Rechercher",
 label_visibility="collapsed"
 )
 with col_user:
@@ -203,41 +199,20 @@ st.markdown("<br>", unsafe_allow_html=True)
 # STATUS BAR
 # =====================================================
 st.markdown(f"""
-<span style='font-weight: 500; color: #1a1a1a;'>{len(active_users)} personnes en ligne</span>
+<span style='font-weight: 500; color: #1a1a1a;'>{len(active_users)} en ligne</span>
 <span style='color: #8e8e8e; margin-left: auto;'>{len(feed)} publications</span>
 """, unsafe_allow_html=True)
 # =====================================================
-# LAYOUT PRINCIPAL (3 colonnes)
+# LAYOUT
 # =====================================================
 col_left, col_center, col_right = st.columns([1, 2.5, 1])
-# =====================================================
-# COLONNE GAUCHE - Navigation
-# =====================================================
 with col_left:
 st.markdown("""
 """, unsafe_allow_html=True)
-st.markdown("<br>", unsafe_allow_html=True)
-# Utilisateurs en ligne
-if len(active_users) > 1:
-st.markdown("""
-""", unsafe_allow_html=True)
-for user in active_users[:5]:
-user_data = NETWORK["USERS"].get(user, {})
-name = user_data.get("name", user.split("#")[0])
-st.markdown(f"""
-{get_initials(name)}
-<span style='font-weight: 500; font-size: 14px;'>{name}</span>
-""", unsafe_allow_html=True)
-st.markdown("</div>", unsafe_allow_html=True)
-# =====================================================
-# COLONNE CENTRALE - Feed Principal
-# =====================================================
 with col_center:
-# Composer (Créer un post)
 with st.expander("✍️ Créer une publication", expanded=False):
 tab1, tab2, tab3 = st.tabs(["📝 Texte", "📷 Photo/Vidéo", "🎵 Audio"])
 def publish(data: bytes, content_type: str, metadata: dict = None):
-"""Publication simplifiée"""
 fragments = SOVEREIGN.encrypt(secret, data, state)
 post = {
 "id": uuid.uuid4().hex[:8],
@@ -252,17 +227,14 @@ post = {
 "metadata": metadata or {}
 }
 NETWORK["FEEDS"][tunnel_id].insert(0, post)
-# Optimisation silencieuse
 state.Phi_M = min(1.0, state.Phi_M + 0.02)
-state.Phi_C = max(0.1, state.Phi_C - 0.005)
-state.Phi_D = min(0.5, state.Phi_D + 0.01)
 st.success("✨ Publication partagée !")
 time.sleep(0.5)
 st.rerun()
 with tab1:
 post_text = st.text_area(
 "Quoi de neuf ?",
-placeholder="Partage quelque chose avec la communauté...",
+placeholder="Partage quelque chose...",
 height=120,
 label_visibility="collapsed"
 )
@@ -271,8 +243,8 @@ if post_text:
 publish(post_text.encode(), "text")
 with tab2:
 uploaded_media = st.file_uploader(
-"Choisir une photo ou vidéo",
-type=['png', 'jpg', 'jpeg', 'gif', 'mp4', 'mov'],
+"Choisir",
+type=['png', 'jpg', 'jpeg', 'gif', 'mp4'],
 label_visibility="collapsed"
 )
 if uploaded_media:
@@ -280,80 +252,53 @@ if uploaded_media.type.startswith('image'):
 st.image(uploaded_media, use_container_width=True)
 else:
 st.video(uploaded_media)
-caption = st.text_input("Légende (optionnel)", placeholder="Ajoute une description...")
-if st.button("📸 Publier la photo/vidéo", use_container_width=True, type="primary"):
-publish(
-uploaded_media.getvalue(),
-uploaded_media.type,
-{"caption": caption, "filename": uploaded_media.name}
-)
+caption = st.text_input("Légende", placeholder="Description...")
+if st.button("📸 Publier", use_container_width=True, type="primary"):
+publish(uploaded_media.getvalue(), uploaded_media.type, {"caption": caption})
 with tab3:
-audio = st.audio_input("🎤 Enregistrer un message vocal")
+audio = st.audio_input("🎤 Enregistrer")
 if audio:
 st.audio(audio)
-if st.button("🎵 Publier l'audio", use_container_width=True, type="primary"):
+if st.button("🎵 Publier", use_container_width=True, type="primary"):
 publish(audio.getvalue(), "audio/wav")
 st.markdown("<br>", unsafe_allow_html=True)
-# Feed de publications
 if not feed:
 st.markdown("""
 """, unsafe_allow_html=True)
 else:
-for post in feed[:20]: # Limiter à 20 posts
+for post in feed[:20]:
 decrypted = SOVEREIGN.decrypt(secret, post["fragments"], state)
 if not decrypted:
 continue
-# Card de post
 st.markdown(f"""
 <div class='user-avatar' style='background: {post["avatar_color"]};'>
 {get_initials(post["display_name"])}
 <div class='username'>{post["display_name"]}</div>
 <div class='time-ago'>{time_ago(post["timestamp"])}</div>
 """, unsafe_allow_html=True)
-# Contenu du post
 if post["type"] == "text":
-st.markdown(f"""
-{decrypted.decode()}
-""", unsafe_allow_html=True)
+st.markdown(f"<div class='post-content'>{decrypted.decode()}</div>", unsafe_allow_html=True)
 elif "image" in post["type"]:
 caption = post.get("metadata", {}).get("caption", "")
 if caption:
 st.markdown(f"<div class='post-content'>{caption}</div>", unsafe_allow_html=True)
-st.markdown("<div class='media-preview'>", unsafe_allow_html=True)
 st.image(decrypted, use_container_width=True)
-st.markdown("</div>", unsafe_allow_html=True)
 elif "video" in post["type"]:
-caption = post.get("metadata", {}).get("caption", "")
-if caption:
-st.markdown(f"<div class='post-content'>{caption}</div>", unsafe_allow_html=True)
-st.markdown("<div class='media-preview'>", unsafe_allow_html=True)
 st.video(decrypted)
-st.markdown("</div>", unsafe_allow_html=True)
 elif "audio" in post["type"]:
 st.audio(decrypted)
-# Actions bar
 col_like, col_comment, col_share = st.columns(3)
 with col_like:
-if st.button(f"❤️ J'aime ({post['likes']})", key=f"like_{post['id']}", use_container_width=True):
+if st.button(f"❤️ {post['likes']}", key=f"like_{post['id']}", use_container_width=True):
 post['likes'] += 1
 st.rerun()
 with col_comment:
-st.button(f"💬 Commenter ({len(post['comments'])})", key=f"comment_{post['id']}", use_container_width=True)
+st.button(f"💬 {len(post['comments'])}", key=f"comment_{post['id']}", use_container_width=True)
 with col_share:
-st.button("🔗 Partager", key=f"share_{post['id']}", use_container_width=True)
+st.button("🔗", key=f"share_{post['id']}", use_container_width=True)
 st.markdown("</div>", unsafe_allow_html=True)
-# =====================================================
-# COLONNE DROITE - Suggestions
-# =====================================================
 with col_right:
 st.markdown("""
 """, unsafe_allow_html=True)
-st.markdown("<br>", unsafe_allow_html=True)
-st.markdown("""
-""", unsafe_allow_html=True)
-# =====================================================
-# AUTO-REFRESH DISCRET
-# =====================================================
-optimize_network(len(feed), state.Phi_C)
 time.sleep(3)
 st.rerun()
