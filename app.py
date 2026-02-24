@@ -3,20 +3,34 @@ from cryptography.fernet import Fernet
 import hashlib, time, uuid, base64, json
 
 # =====================================================
-# CONFIGURATION ET STYLE (PRO)
+# CONFIGURATION ET STYLE (CORRIGÉ)
 # =====================================================
 st.set_page_config(page_title="GEN-Z GABON", page_icon="🇬🇦", layout="centered")
 
+# Suppression du paramètre erroné, utilisation du standard
 st.markdown("""
     <style>
     .stApp { background-color: #0e1117; color: white; }
-    .status-box { padding: 10px; border-radius: 10px; border: 1px solid #00ff00; background: #001a00; }
-    .msg-box { padding: 15px; border-radius: 15px; background: #1e1e1e; margin-bottom: 10px; border-left: 5px solid #2e7d32; }
+    .status-box { 
+        padding: 10px; 
+        border-radius: 10px; 
+        border: 1px solid #00ff00; 
+        background: #001a00; 
+        text-align: center;
+        font-weight: bold;
+    }
+    .msg-box { 
+        padding: 15px; 
+        border-radius: 15px; 
+        background: #1e1e1e; 
+        margin-bottom: 10px; 
+        border-left: 5px solid #2e7d32; 
+    }
     </style>
-""", unsafe_allow_state_with_metadata=True)
+""", unsafe_allow_html=True)
 
 # =====================================================
-# ENGINE SOUVERAIN (TON MOTEUR OPTIMISÉ)
+# ENGINE SOUVERAIN (TON MOTEUR ORIGINAL)
 # =====================================================
 class SOVEREIGN:
     @staticmethod
@@ -33,7 +47,6 @@ class SOVEREIGN:
         f = Fernet(SOVEREIGN.key(secret))
         c = f.encrypt(data)
         n = len(c)
-        # Fragmentation pour la sécurité
         return [base64.b64encode(c[:n//3]).decode(), 
                 base64.b64encode(c[n//3:2*n//3]).decode(), 
                 base64.b64encode(c[2*n//3:]).decode()]
@@ -42,12 +55,12 @@ class SOVEREIGN:
     def decrypt(secret, frags):
         try:
             f = Fernet(SOVEREIGN.key(secret))
-            combined = b"".join([base64.b64decode(f) for f in frags])
+            combined = b"".join([base64.b64decode(frag) for frag in frags])
             return f.decrypt(combined)
         except: return None
 
 # =====================================================
-# BASE DE DONNÉES NODE (PARTAGÉE)
+# NODE DATABASE (SYSTÈME DE CACHE PARTAGÉ)
 # =====================================================
 @st.cache_resource
 def get_node():
@@ -56,20 +69,19 @@ def get_node():
 NODE = get_node()
 
 # =====================================================
-# SESSION & AUTH
+# SESSION & AUTHENTIFICATION
 # =====================================================
 if "uid" not in st.session_state:
     st.title("🇬🇦 GEN-Z GABON")
-    nick = st.text_input("Pseudo Kongossa", placeholder="Ex: @PimentGabonais")
+    nick = st.text_input("Pseudo Kongossa")
     if nick:
         st.session_state.uid = f"🇬🇦 {nick}#{uuid.uuid4().hex[:3]}"
         st.rerun()
     st.stop()
 
-# --- ACCÈS AU TUNNEL ---
-secret = st.sidebar.text_input("Code Tunnel Secret", type="password", help="Les utilisateurs avec le même code se voient en direct.")
+secret = st.sidebar.text_input("Code Tunnel Secret", type="password")
 if not secret:
-    st.info("💡 Entre un 'Code Tunnel' pour rejoindre la discussion.")
+    st.info("Entre un code pour activer ton tunnel.")
     st.stop()
 
 sid = SOVEREIGN.tunnel(secret)
@@ -77,28 +89,22 @@ if sid not in NODE["TUNNELS"]:
     NODE["TUNNELS"][sid] = []
 
 # =====================================================
-# LIVE PRESENCE (LE VOYANT VERT)
+# PRÉSENCE EN DIRECT
 # =====================================================
 now = time.time()
 NODE["PRESENCE"][st.session_state.uid] = {"ts": now, "sid": sid}
-# Nettoyage auto des inactifs (30s)
-active_users = [u for u, data in NODE["PRESENCE"].items() if (now - data["ts"] < 30 and data["sid"] == sid)]
+# On filtre ceux qui sont sur le même tunnel et actifs depuis < 30s
+active_now = [u for u, d in NODE["PRESENCE"].items() if (now - d["ts"] < 30 and d["sid"] == sid)]
 
 # =====================================================
-# INTERFACE PRINCIPALE
+# INTERFACE DE PUBLICATION
 # =====================================================
 st.title("🏠 Flux Souverain")
+st.markdown(f"<div class='status-box'>🟢 {len(active_now)} Membres en ligne</div>", unsafe_allow_html=True)
+st.write(f"**ID Tunnel :** `{sid}`")
 
-# Affichage du statut en haut
-col_stat1, col_stat2 = st.columns([2, 1])
-with col_stat1:
-    st.markdown(f"**Tunnel ID:** `{sid}`")
-with col_stat2:
-    st.markdown(f"<div class='status-box'>🟢 {len(active_users)} Actifs</div>", unsafe_allow_html=True)
-
-# --- ZONE D'ENVOI ---
-with st.expander("➕ PUBLIER (Texte, Photo, Vocal)", expanded=True):
-    mode = st.tabs(["💬 Texte", "📸 Média", "🎙️ Vocal"])
+with st.expander("➕ PUBLIER UN MESSAGE / MÉDIA", expanded=True):
+    tab1, tab2, tab3 = st.tabs(["💬 Texte", "📸 Média", "🎙️ Vocal"])
     
     def push(data, typ):
         frags = SOVEREIGN.encrypt(secret, data)
@@ -110,65 +116,55 @@ with st.expander("➕ PUBLIER (Texte, Photo, Vocal)", expanded=True):
         })
         st.rerun()
 
-    with mode[0]:
-        txt = st.text_area("", placeholder="Écris ton message ici...", key="txt_area")
-        if st.button("Envoyer", use_container_width=True):
+    with tab1:
+        txt = st.text_area("Message", label_visibility="collapsed")
+        if st.button("Envoyer le texte", use_container_width=True):
             if txt: push(txt.encode(), "text")
 
-    with mode[1]:
-        f = st.file_uploader("Upload Image/Vidéo", type=['png', 'jpg', 'jpeg', 'mp4'])
-        if f and st.button("Diffuser Média", use_container_width=True):
+    with tab2:
+        f = st.file_uploader("Choisir un fichier", type=['png', 'jpg', 'mp4'])
+        if f and st.button("Diffuser le fichier", use_container_width=True):
             push(f.getvalue(), f.type)
 
-    with mode[2]:
-        a = st.audio_input("Micro")
-        if a and st.button("Envoyer Vocal", use_container_width=True):
+    with tab3:
+        a = st.audio_input("Enregistrer un vocal")
+        if a and st.button("Envoyer le vocal", use_container_width=True):
             push(a.getvalue(), "audio/wav")
 
 st.divider()
 
-# --- FIL DE DISCUSSION (REVERSE CHRONO) ---
-messages = NODE["TUNNELS"][sid]
-for m in reversed(messages):
+# =====================================================
+# AFFICHAGE DU FLUX (LIVESTREAM)
+# =====================================================
+for m in reversed(NODE["TUNNELS"][sid]):
     raw = SOVEREIGN.decrypt(secret, m["f"])
     if raw:
-        with st.container():
-            st.markdown(f"**{m['u']}** <span style='color:gray; font-size:10px;'>{time.strftime('%H:%M', time.localtime(m['ts']))}</span>", unsafe_allow_html=True)
-            
-            if m["t"] == "text":
-                st.markdown(f"<div class='msg-box'>{raw.decode()}</div>", unsafe_allow_html=True)
-            elif "image" in m["t"]:
-                st.image(raw, use_column_width=True)
-            elif "video" in m["t"]:
-                st.video(raw)
-            elif "audio" in m["t"]:
-                st.audio(raw)
-    else:
-        # Si le décryptage échoue (mauvais code secret)
-        pass
+        st.markdown(f"**{m['u']}** • <small>{time.strftime('%H:%M', time.localtime(m['ts']))}</small>", unsafe_allow_html=True)
+        if m["t"] == "text":
+            st.markdown(f"<div class='msg-box'>{raw.decode()}</div>", unsafe_allow_html=True)
+        elif "image" in m["t"]:
+            st.image(raw)
+        elif "video" in m["t"]:
+            st.video(raw)
+        else:
+            st.audio(raw)
 
 # =====================================================
-# SYNC SOUVERAINE (BACKUP)
+# SYNC & BACKUP (MENU LATÉRAL)
 # =====================================================
 st.sidebar.divider()
-st.sidebar.subheader("🌐 Synchronisation")
+exp_json = json.dumps(NODE["TUNNELS"][sid])
+st.sidebar.download_button("⬇️ Exporter (Backup)", exp_json, file_name=f"genz_{sid}.json")
 
-# Export
-export_data = json.dumps(NODE["TUNNELS"][sid], ensure_ascii=False)
-st.sidebar.download_button("⬇️ Exporter le Tunnel", export_data, file_name=f"sync_{sid}.json", use_container_width=True)
-
-# Import
-imp = st.sidebar.file_uploader("📂 Importer Data")
+imp = st.sidebar.file_uploader("📂 Importer (Sync)")
 if imp:
-    incoming = json.loads(imp.read().decode("utf-8"))
-    # Fusion intelligente (éviter les doublons par timestamp)
-    existing_ts = [m["ts"] for m in NODE["TUNNELS"][sid]]
-    for msg in incoming:
-        if msg["ts"] not in existing_ts:
+    data = json.loads(imp.read().decode())
+    # Fusion sans doublons
+    current_ts = [msg["ts"] for msg in NODE["TUNNELS"][sid]]
+    for msg in data:
+        if msg["ts"] not in current_ts:
             NODE["TUNNELS"][sid].append(msg)
-    st.sidebar.success("Fusion terminée !")
     st.rerun()
 
-# --- AUTO-REFRESH (4 secondes pour le live) ---
 time.sleep(4)
 st.rerun()
