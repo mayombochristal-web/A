@@ -1,249 +1,149 @@
 import streamlit as st
-from cryptography.fernet import Fernet
-import hashlib, time, uuid, base64, json
-from pathlib import Path
+import math
+import time
+import random
 
 # =====================================================
-# CONFIGURATION & STYLE
+# CONFIG
 # =====================================================
-st.set_page_config(page_title="GEN-Z GABON", page_icon="🇬🇦", layout="centered")
-
-st.markdown("""
-<style>
-.stApp { background-color: #0e1117; color: white; }
-.status-box {
-    padding: 10px;
-    border-radius: 10px;
-    border: 1px solid #00ff00;
-    background: #001a00;
-    text-align: center;
-    font-weight: bold;
-}
-.msg-box {
-    padding: 15px;
-    border-radius: 15px;
-    background: #1e1e1e;
-    margin-bottom: 10px;
-    border-left: 5px solid #2e7d32;
-}
-</style>
-""", unsafe_allow_html=True)
-
-# =====================================================
-# ENGINE SOUVERAIN (CHIFFREMENT)
-# =====================================================
-class SOVEREIGN:
-
-    @staticmethod
-    def tunnel(secret):
-        return hashlib.sha256(secret.encode()).hexdigest()[:20]
-
-    @staticmethod
-    def key(secret):
-        k = hashlib.pbkdf2_hmac(
-            "sha256",
-            secret.encode(),
-            b"GABON-SOVEREIGN",
-            150000
-        )
-        return base64.urlsafe_b64encode(k[:32])
-
-    @staticmethod
-    def encrypt(secret, data):
-        f = Fernet(SOVEREIGN.key(secret))
-        c = f.encrypt(data)
-        n = len(c)
-        return [
-            base64.b64encode(c[:n//3]).decode(),
-            base64.b64encode(c[n//3:2*n//3]).decode(),
-            base64.b64encode(c[2*n//3:]).decode()
-        ]
-
-    @staticmethod
-    def decrypt(secret, frags):
-        try:
-            f = Fernet(SOVEREIGN.key(secret))
-            combined = b"".join(base64.b64decode(x) for x in frags)
-            return f.decrypt(combined)
-        except:
-            return None
-
-# =====================================================
-# STOCKAGE PERSISTANT (MULTI-UTILISATEURS RÉELS)
-# =====================================================
-DATA_DIR = Path("data")
-DATA_DIR.mkdir(exist_ok=True)
-
-def tunnel_file(sid):
-    return DATA_DIR / f"{sid}.json"
-
-def load_tunnel(sid):
-    f = tunnel_file(sid)
-    if f.exists():
-        return json.loads(f.read_text())
-    return []
-
-def save_tunnel(sid, data):
-    tunnel_file(sid).write_text(json.dumps(data))
-
-# =====================================================
-# AUTHENTIFICATION UTILISATEUR
-# =====================================================
-if "uid" not in st.session_state:
-    st.title("🇬🇦 GEN-Z GABON")
-
-    nick = st.text_input("Pseudo Kongossa")
-
-    if nick:
-        st.session_state.uid = f"🇬🇦 {nick}#{uuid.uuid4().hex[:3]}"
-        st.rerun()
-
-    st.stop()
-
-# =====================================================
-# TUNNEL SECRET
-# =====================================================
-secret = st.sidebar.text_input("Code Tunnel Secret", type="password")
-
-if not secret:
-    st.info("Entre un code pour activer ton tunnel.")
-    st.stop()
-
-sid = SOVEREIGN.tunnel(secret)
-MESSAGES = load_tunnel(sid)
-
-# =====================================================
-# PRÉSENCE SIMPLE (LOCALE SESSION)
-# =====================================================
-if "last_seen" not in st.session_state:
-    st.session_state.last_seen = time.time()
-
-st.session_state.last_seen = time.time()
-
-# estimation simple
-online_estimate = max(1, len(MESSAGES) // 5)
-
-# =====================================================
-# INTERFACE
-# =====================================================
-st.title("🏠 Flux Souverain")
-
-st.markdown(
-    f"<div class='status-box'>🟢 {online_estimate} Membres actifs</div>",
-    unsafe_allow_html=True
+st.set_page_config(
+    page_title="FREE — KONGOSSA",
+    page_icon="⚛️",
+    layout="centered"
 )
 
-st.write(f"**ID Tunnel :** `{sid}`")
+st.title("⚛️ TTU FORGE — Simulation Erbium-Or")
+st.caption("Univers TTU minimal incarné par Streamlit")
 
 # =====================================================
-# ENVOI MESSAGE
+# UNIVERS TTU (ETAT GLOBAL)
 # =====================================================
-def push(data, typ):
-    global MESSAGES
-
-    frags = SOVEREIGN.encrypt(secret, data)
-
-    msg = {
-        "u": st.session_state.uid,
-        "f": frags,
-        "t": typ,
-        "ts": time.time()
-    }
-
-    MESSAGES.append(msg)
-    save_tunnel(sid, MESSAGES)
-
-    st.rerun()
+if "rho" not in st.session_state:
+    st.session_state.rho = 0.2        # densité énergie
+    st.session_state.phi = 0.55       # cohérence
+    st.session_state.gamma = 1.0      # largeur spectrale
+    st.session_state.phase = "Stable"
+    st.session_state.tick = 0
 
 # =====================================================
-# PUBLICATION
+# MODELE TTU (COEUR PHYSIQUE)
 # =====================================================
-with st.expander("➕ PUBLIER UN MESSAGE / MÉDIA", expanded=True):
 
-    tab1, tab2, tab3 = st.tabs(["💬 Texte", "📸 Média", "🎙️ Vocal"])
+PHI_CRIT = 0.5088      # seuil triadique TTU
+FORGE_THRESHOLD = 0.95 # transition Erbium
 
-    with tab1:
-        txt = st.text_area("Message", label_visibility="collapsed")
+def ttu_update(rho, tick):
+    """
+    Dynamique TTU simplifiée :
+    - rho injectée par observateur
+    - cohérence augmente non-linéairement
+    - saturation + courbure lanthanide
+    """
 
-        if st.button("Envoyer le texte", use_container_width=True):
-            if txt:
-                push(txt.encode(), "text")
+    # effet courbure (zone lanthanides)
+    K = 25 + 5 * math.sin(tick * 0.2)
 
-    with tab2:
-        f = st.file_uploader("Choisir un fichier", type=["png","jpg","jpeg","mp4"])
+    # cohérence informationnelle
+    phi = 0.5 + 0.5 * math.tanh(2.5 * (rho - 0.4)) - (K / 200)
 
-        if f and st.button("Diffuser le fichier", use_container_width=True):
-            push(f.getvalue(), f.type)
+    phi = max(0.0, min(1.0, phi))
 
-    with tab3:
-        a = st.audio_input("Enregistrer un vocal")
+    # largeur spectrale (rétrécissement)
+    gamma = math.exp(-4 * phi)
 
-        if a and st.button("Envoyer le vocal", use_container_width=True):
-            push(a.getvalue(), "audio/wav")
+    # phase TTU
+    if phi < PHI_CRIT:
+        phase = "Dissolution"
+    elif phi < 0.75:
+        phase = "Résonance"
+    elif phi < FORGE_THRESHOLD:
+        phase = "Cohérence Forte"
+    else:
+        phase = "🔥 FORGE ACTIVE"
+
+    return phi, gamma, phase, K
+
+# =====================================================
+# INTERACTION OBSERVATEUR
+# =====================================================
+
+st.subheader("⚡ Injection d'Énergie (ρ)")
+
+rho_input = st.slider(
+    "Densité d'énergie ρ (J/m³)",
+    0.0,
+    1.2,
+    st.session_state.rho,
+    0.01
+)
+
+if st.button("Injecter énergie"):
+    st.session_state.rho = rho_input
+
+# =====================================================
+# EVOLUTION TEMPORELLE TTU
+# =====================================================
+
+st.session_state.tick += 1
+
+phi, gamma, phase, K = ttu_update(
+    st.session_state.rho,
+    st.session_state.tick
+)
+
+st.session_state.phi = phi
+st.session_state.gamma = gamma
+st.session_state.phase = phase
+
+# =====================================================
+# OBSERVATION (MESURE)
+# =====================================================
+
+col1, col2 = st.columns(2)
+
+with col1:
+    st.metric("Φc — Cohérence", f"{phi*100:.2f} %")
+
+    if phi > FORGE_THRESHOLD:
+        st.success("Superposition orbitale atteinte")
+    elif phi < PHI_CRIT:
+        st.error("Rupture triadique")
+
+with col2:
+    st.metric("Γ — Largeur spectrale", f"{gamma:.4f} nm")
+    st.metric("Courbure K", f"{K:.2f}")
 
 st.divider()
 
 # =====================================================
-# AFFICHAGE FLUX
+# VISUALISATION TTU
 # =====================================================
-MESSAGES = load_tunnel(sid)
 
-for m in reversed(MESSAGES):
+st.subheader("📡 État de Phase")
 
-    raw = SOVEREIGN.decrypt(secret, m["f"])
-
-    if raw:
-
-        st.markdown(
-            f"**{m['u']}** • "
-            f"<small>{time.strftime('%H:%M', time.localtime(m['ts']))}</small>",
-            unsafe_allow_html=True
-        )
-
-        if m["t"] == "text":
-            st.markdown(
-                f"<div class='msg-box'>{raw.decode()}</div>",
-                unsafe_allow_html=True
-            )
-
-        elif "image" in m["t"]:
-            st.image(raw)
-
-        elif "video" in m["t"]:
-            st.video(raw)
-
-        else:
-            st.audio(raw)
+if phase == "🔥 FORGE ACTIVE":
+    st.markdown("### 🔥 Forge Erbium-Or ACTIVE")
+elif phase == "Résonance":
+    st.info("Zone Lanthanide — Cohérence par Courbure")
+elif phase == "Dissolution":
+    st.warning("Perte de cohérence informationnelle")
+else:
+    st.write("État stable")
 
 # =====================================================
-# BACKUP & SYNC
+# BRUIT QUANTIQUE OBSERVATIONNEL
 # =====================================================
-st.sidebar.divider()
 
-exp_json = json.dumps(MESSAGES)
+noise = random.uniform(-0.01, 0.01)
+observed_phi = max(0, min(1, phi + noise))
 
-st.sidebar.download_button(
-    "⬇️ Exporter (Backup)",
-    exp_json,
-    file_name=f"genz_{sid}.json"
-)
-
-imp = st.sidebar.file_uploader("📂 Importer (Sync)")
-
-if imp:
-    data = json.loads(imp.read().decode())
-
-    existing = {m["ts"] for m in MESSAGES}
-
-    for msg in data:
-        if msg["ts"] not in existing:
-            MESSAGES.append(msg)
-
-    save_tunnel(sid, MESSAGES)
-    st.rerun()
+st.progress(observed_phi)
 
 # =====================================================
-# AUTO REFRESH
+# TEMPS TTU
 # =====================================================
-time.sleep(4)
+
+st.caption(f"Tick TTU : {st.session_state.tick}")
+
+time.sleep(1.5)
 st.rerun()
