@@ -6,37 +6,56 @@ import uuid, time, json, base64, requests
 # =====================================================
 
 st.set_page_config(
-    page_title="GEN-Z GABON • V20",
-    page_icon="🇬🇦",
+    page_title="GEN-Z SOCIAL V21",
+    page_icon="🌍",
     layout="centered"
 )
 
-SYNC_INTERVAL = 6
+SYNC_DELAY = 5
 
 # =====================================================
-# SAFE JSON
+# UTILS
 # =====================================================
 
-def safe(obj):
-    return json.loads(json.dumps(obj))
+def safe(x):
+    return json.loads(json.dumps(x))
 
-def b64e(b):
+def enc(b):
     return base64.b64encode(b).decode()
 
-def b64d(s):
+def dec(s):
     return base64.b64decode(s.encode())
 
 # =====================================================
-# NODE INIT
+# INIT USER
+# =====================================================
+
+if "USER" not in st.session_state:
+
+    pseudo = st.text_input("Choisis ton pseudo ✨")
+
+    if pseudo:
+        st.session_state.USER = {
+            "id": uuid.uuid4().hex[:8],
+            "name": pseudo
+        }
+        st.rerun()
+
+    st.stop()
+
+USER = st.session_state.USER
+
+# =====================================================
+# NODE
 # =====================================================
 
 if "NODE" not in st.session_state:
     st.session_state.NODE = {
-        "ID": uuid.uuid4().hex[:8],
-        "TUNNELS": {"public":{"version":0,"messages":[]}},
-        "SUBS": {},
-        "LAST_SYNC": 0,
-        "PUBLIC": False
+        "posts": [],
+        "dms": {},
+        "subs": {},
+        "discover": {},
+        "last_sync": 0
     }
 
 NODE = st.session_state.NODE
@@ -44,160 +63,174 @@ NODE = st.session_state.NODE
 BASE_URL = st.query_params.get("base","LOCAL")
 
 # =====================================================
-# AUTO SUBSCRIBE VIA LINK
-# =====================================================
-
-if "node" in st.query_params:
-    nid = st.query_params["node"]
-    url = st.query_params.get("url","")
-    if nid and url:
-        NODE["SUBS"][nid]=url
-
-# =====================================================
-# API MODE
+# API STATE
 # =====================================================
 
 if st.query_params.get("api")=="state":
     st.json(safe({
-        "ID":NODE["ID"],
-        "TUNNELS":NODE["TUNNELS"]
+        "user":USER,
+        "posts":NODE["posts"]
     }))
     st.stop()
 
 # =====================================================
-# SYNC ENGINE
+# SYNC
 # =====================================================
 
-def merge(remote):
-    for t,data in remote.items():
-        if t not in NODE["TUNNELS"]:
-            NODE["TUNNELS"][t]=data
-        else:
-            if data["version"]>NODE["TUNNELS"][t]["version"]:
-                NODE["TUNNELS"][t]=data
-
-def auto_sync():
+def sync():
     now=time.time()
-    if now-NODE["LAST_SYNC"]<SYNC_INTERVAL:
+    if now-NODE["last_sync"]<SYNC_DELAY:
         return
 
-    for nid,url in list(NODE["SUBS"].items()):
+    for url in list(NODE["subs"].values()):
         try:
             r=requests.get(url+"?api=state",timeout=3)
             data=r.json()
-            merge(data["TUNNELS"])
+
+            NODE["discover"][data["user"]["id"]] = {
+                "name":data["user"]["name"],
+                "url":url
+            }
+
+            for p in data["posts"]:
+                if p["id"] not in [x["id"] for x in NODE["posts"]]:
+                    NODE["posts"].append(p)
+
         except:
             pass
 
-    NODE["LAST_SYNC"]=now
+    NODE["last_sync"]=now
 
-auto_sync()
+sync()
 
 # =====================================================
 # UI
 # =====================================================
 
-st.title("🇬🇦 GEN-Z GABON — V20")
+st.title("🌍 GEN-Z SOCIAL")
 
-tabs=st.tabs(["💬 Signaux","➕ Nouveau signal","🌐 Nodes","👤 Mon node"])
+tabs = st.tabs(["🏠 Accueil","➕ Publier","💬 Discussions","👥 Découvrir","👤 Profil"])
 
 # =====================================================
-# SIGNaux
+# ACCUEIL (FEED)
 # =====================================================
 
 with tabs[0]:
 
-    msgs=NODE["TUNNELS"]["public"]["messages"]
+    feed = sorted(NODE["posts"], key=lambda x:x["ts"], reverse=True)
 
-    for m in reversed(msgs):
+    if not feed:
+        st.info("Ajoute des amis dans Découvrir 👥")
 
-        st.caption(m["user"])
+    for p in feed:
+        st.subheader(p["user"])
+        if p["type"]=="text":
+            st.write(p["data"])
+        elif p["type"]=="image":
+            st.image(dec(p["data"]))
+        elif p["type"]=="audio":
+            st.audio(dec(p["data"]))
 
-        if m["type"]=="text":
-            st.write(m["data"])
-
-        elif m["type"]=="image":
-            st.image(b64d(m["data"]))
-
-        elif m["type"]=="audio":
-            st.audio(b64d(m["data"]))
+        st.divider()
 
 # =====================================================
-# NOUVEAU SIGNAL (UX V16)
+# PUBLIER
 # =====================================================
 
 with tabs[1]:
 
-    mode=st.radio(
-        "Type",
-        ["Texte","Image","Vocal"],
-        horizontal=True
-    )
+    mode = st.radio("Publier",["Texte","Image","Vocal"],horizontal=True)
 
-    def push(data,typ):
-        t=NODE["TUNNELS"]["public"]
-        t["version"]+=1
-        t["messages"].append({
+    def publish(data,typ):
+        NODE["posts"].append({
             "id":uuid.uuid4().hex,
-            "user":NODE["ID"],
+            "user":USER["name"],
             "type":typ,
             "data":data,
             "ts":time.time()
         })
 
     if mode=="Texte":
-        txt=st.text_area("Message")
-        if st.button("Envoyer"):
-            push(txt,"text")
+        txt=st.text_area("Exprime toi...")
+        if st.button("Publier"):
+            publish(txt,"text")
             st.rerun()
 
     elif mode=="Image":
         f=st.file_uploader("Image")
-        if f and st.button("Envoyer image"):
-            push(b64e(f.getvalue()),"image")
+        if f and st.button("Publier image"):
+            publish(enc(f.getvalue()),"image")
             st.rerun()
 
     elif mode=="Vocal":
-        a=st.audio_input("Micro")
-        if a and st.button("Envoyer vocal"):
-            push(b64e(a.getvalue()),"audio")
+        a=st.audio_input("Message vocal")
+        if a and st.button("Publier vocal"):
+            publish(enc(a.getvalue()),"audio")
             st.rerun()
 
 # =====================================================
-# NODES
+# DISCUSSIONS (DM AUTO)
 # =====================================================
 
 with tabs[2]:
 
-    st.subheader("S'abonner à un node")
+    if not NODE["dms"]:
+        st.info("Clique sur un profil dans Découvrir pour discuter.")
 
-    url=st.text_input("URL du node")
+    for uid,chat in NODE["dms"].items():
+        st.subheader(chat["name"])
 
-    if st.button("S'abonner"):
-        nid=uuid.uuid4().hex[:6]
-        NODE["SUBS"][nid]=url
-        st.success("Node ajouté ✅")
+        for m in chat["msgs"]:
+            st.write(m)
 
-    st.divider()
+        msg=st.text_input(f"Message à {chat['name']}",key=uid)
 
-    st.subheader("Nodes suivis")
-
-    for nid,url in NODE["SUBS"].items():
-        st.write(f"🟢 {nid} → {url}")
+        if st.button("Envoyer",key=uid+"btn"):
+            chat["msgs"].append(f"{USER['name']} : {msg}")
+            st.rerun()
 
 # =====================================================
-# MON NODE
+# DECOUVRIR
 # =====================================================
 
 with tabs[3]:
 
-    st.write("ID Node :",NODE["ID"])
+    url = st.text_input("Ajouter un ami (URL node)")
 
-    share_link=f"?node={NODE['ID']}&url={BASE_URL}"
+    if st.button("Suivre"):
+        NODE["subs"][uuid.uuid4().hex[:6]] = url
+        st.success("Abonné ✅")
 
-    st.code(share_link)
+    st.divider()
 
-    st.caption("Partage ce lien pour que quelqu’un s’abonne automatiquement.")
+    for uid,data in NODE["discover"].items():
+
+        col1,col2=st.columns([3,1])
+
+        with col1:
+            st.write("👤",data["name"])
+
+        with col2:
+            if st.button("Message",key=uid):
+                if uid not in NODE["dms"]:
+                    NODE["dms"][uid]={
+                        "name":data["name"],
+                        "msgs":[]
+                    }
+
+# =====================================================
+# PROFIL
+# =====================================================
+
+with tabs[4]:
+
+    st.subheader(USER["name"])
+    st.write("ID :",USER["id"])
+
+    share = f"?node={USER['id']}&url={BASE_URL}"
+
+    st.code(share)
+    st.caption("Partage ce lien pour que tes amis te suivent.")
 
 # =====================================================
 # AUTO REFRESH
