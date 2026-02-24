@@ -1,293 +1,207 @@
-import streamlit as st
-from cryptography.fernet import Fernet
-import hashlib, time, uuid, base64, math
+# =====================================================
+# GEN-Z GABON FREE-KONGOSSA — V27 TTU ULTRA
+# Architecture Anti-Crash Streamlit
+# =====================================================
 
-# =====================================================
-# CONFIG
-# =====================================================
+import streamlit as st
+import json
+import os
+import time
+from datetime import datetime
+from streamlit_autorefresh import st_autorefresh
+from PIL import Image
+
+# ---------------- CONFIG ----------------
 
 st.set_page_config(
     page_title="GEN-Z GABON FREE-KONGOSSA",
-    page_icon="🇬🇦",
-    layout="centered"
+    layout="wide"
 )
 
-# =====================================================
-# STYLE
-# =====================================================
+DATA_FILE = "tunnel_ttu.json"
 
-st.markdown("""
-<style>
-.stApp{background:#0e1117;color:white;}
+# ---------------- TTU STORAGE ----------------
 
-.msg-box{
-padding:14px;
-border-radius:14px;
-background:#1e1e1e;
-margin-bottom:10px;
-border-left:5px solid #2e7d32;
-}
+def init_db():
+    if not os.path.exists(DATA_FILE):
+        with open(DATA_FILE, "w") as f:
+            json.dump({"messages": [], "lives": []}, f)
 
-.login-box{
-padding:25px;
-border-radius:15px;
-background:#161b22;
-text-align:center;
-}
-</style>
-""",unsafe_allow_html=True)
+def load_db():
+    with open(DATA_FILE, "r") as f:
+        return json.load(f)
 
-# =====================================================
-# TTU ENGINE (ANTI CRASH)
-# =====================================================
+def save_db(data):
+    with open(DATA_FILE, "w") as f:
+        json.dump(data, f)
 
-def ttu_update(rho,tick):
+init_db()
 
-    K=25+5*math.sin(tick*0.2)
+# ---------------- TTU AUTO SYNC ----------------
+# rafraîchissement doux (principe Δt TTU)
 
-    phi=0.5+0.5*math.tanh(2.5*(rho-0.4))-(K/200)
-    phi=max(0,min(1,phi))
+st_autorefresh(interval=3000, key="ttu_refresh")
 
-    gamma=math.exp(-4*phi)
+# ---------------- SESSION ----------------
 
-    if phi<0.3:
-        phase="😴 Tunnel calme"
-        refresh=7
-    elif phi<0.6:
-        phase="🟢 Discussions actives"
-        refresh=4
-    elif phi<0.85:
-        phase="⚡ Tunnel chaud"
-        refresh=2
-    else:
-        phase="🔥 VIRAL"
-        refresh=1
-
-    return phi,gamma,phase,K,refresh
+if "user" not in st.session_state:
+    st.session_state.user = None
 
 # =====================================================
-# CRYPTO
+# PAGE LOGIN (SANS SIDEBAR)
 # =====================================================
 
-class SOVEREIGN:
+if st.session_state.user is None:
 
-    @staticmethod
-    def tunnel(secret):
-        return hashlib.sha256(secret.encode()).hexdigest()[:20]
+    st.title("🔥 GEN-Z GABON FREE-KONGOSSA")
 
-    @staticmethod
-    def key(secret):
-        k=hashlib.pbkdf2_hmac(
-            "sha256",secret.encode(),
-            b"GABON-SOVEREIGN",150000)
-        return base64.urlsafe_b64encode(k[:32])
+    pseudo = st.text_input("Pseudo")
+    code = st.text_input("Code secret", type="password")
 
-    @staticmethod
-    def encrypt(secret,data):
-        f=Fernet(SOVEREIGN.key(secret))
-        return base64.b64encode(f.encrypt(data)).decode()
-
-    @staticmethod
-    def decrypt(secret,data):
-        try:
-            f=Fernet(SOVEREIGN.key(secret))
-            return f.decrypt(base64.b64decode(data))
-        except:
-            return None
-
-# =====================================================
-# NODE GLOBAL
-# =====================================================
-
-@st.cache_resource
-def get_node():
-    return {"TUNNELS":{}, "PRESENCE":{}, "TTU":{}, "LIVE":{}}
-
-NODE=get_node()
-
-# =====================================================
-# LOGIN PREMIÈRE PAGE
-# =====================================================
-
-if "uid" not in st.session_state:
-
-    st.markdown("<div class='login-box'>",unsafe_allow_html=True)
-
-    st.title("🇬🇦 GEN-Z GABON")
-    st.subheader("FREE-KONGOSSA")
-
-    pseudo=st.text_input("Pseudo")
-    secret=st.text_input("Code Tunnel Secret",type="password")
-
-    if st.button("ENTRER",use_container_width=True):
-        if pseudo and secret:
-            st.session_state.uid=f"🇬🇦 {pseudo}#{uuid.uuid4().hex[:3]}"
-            st.session_state.secret=secret
+    if st.button("Entrer dans le Tunnel"):
+        if pseudo and code:
+            st.session_state.user = pseudo
             st.rerun()
 
-    st.markdown("</div>",unsafe_allow_html=True)
     st.stop()
 
 # =====================================================
-# INIT SESSION
+# APP PRINCIPALE
 # =====================================================
 
-secret=st.session_state.secret
-sid=SOVEREIGN.tunnel(secret)
+db = load_db()
 
-NODE["TUNNELS"].setdefault(sid,[])
-NODE["TTU"].setdefault(sid,{"rho":0.2,"tick":0})
-NODE["LIVE"].setdefault(sid,None)
+st.title(f"🌍 Tunnel Social — {st.session_state.user}")
 
-TTU=NODE["TTU"][sid]
-
-# =====================================================
-# PRESENCE
-# =====================================================
-
-now=time.time()
-NODE["PRESENCE"][st.session_state.uid]={"ts":now,"sid":sid}
-
-active_now=[u for u,d in NODE["PRESENCE"].items()
-            if now-d["ts"]<30 and d["sid"]==sid]
-
-# =====================================================
-# PUSH MESSAGE
-# =====================================================
-
-def push(data,typ):
-
-    NODE["TUNNELS"][sid].append({
-        "u":st.session_state.uid,
-        "d":SOVEREIGN.encrypt(secret,data),
-        "t":typ,
-        "ts":time.time()
-    })
-
-    NODE["TUNNELS"][sid]=NODE["TUNNELS"][sid][-150:]
-    TTU["rho"]=min(1.2,TTU["rho"]+0.02)
-
-# =====================================================
-# UI
-# =====================================================
-
-st.title("🏠 Flux Souverain")
-st.write(f"🟢 {len(active_now)} membres en ligne")
-
-# =====================================================
-# ONGLET PUBLIER COMPLET
-# =====================================================
-
-with st.expander("➕ PUBLIER",expanded=True):
-
-    tab1,tab2,tab3,tab4=st.tabs(
-        ["💬 Texte","📸 Photo/Vidéo","🎙️ Audio","🔴 Live"]
-    )
-
-    # -------- TEXTE --------
-    with tab1:
-        txt=st.text_area("Message",label_visibility="collapsed")
-        if st.button("Envoyer texte",use_container_width=True):
-            if txt:
-                push(txt.encode(),"text")
-                st.rerun()
-
-    # -------- PHOTO / VIDEO --------
-    with tab2:
-
-        img=st.camera_input("Prendre une photo")
-
-        file=st.file_uploader(
-            "Ou envoyer un média",
-            type=["png","jpg","jpeg","mp4"]
-        )
-
-        if img and st.button("Publier photo"):
-            push(img.getvalue(),"image")
-            st.rerun()
-
-        if file and st.button("Publier fichier"):
-            push(file.getvalue(),file.type)
-            st.rerun()
-
-    # -------- AUDIO --------
-    with tab3:
-        audio=st.audio_input("Enregistrer un vocal")
-
-        if audio and st.button("Envoyer vocal"):
-            push(audio.getvalue(),"audio")
-            st.rerun()
-
-    # -------- LIVE (SIMULATION STABLE) --------
-    with tab4:
-
-        if NODE["LIVE"][sid] is None:
-            if st.button("🔴 Démarrer LIVE"):
-                NODE["LIVE"][sid]=st.session_state.uid
-                TTU["rho"]+=0.1
-                st.rerun()
-        else:
-            st.success(f"🔴 LIVE par {NODE['LIVE'][sid]}")
-
-            if NODE["LIVE"][sid]==st.session_state.uid:
-                if st.button("⛔ Stop LIVE"):
-                    NODE["LIVE"][sid]=None
-                    st.rerun()
-
-st.divider()
-
-# =====================================================
-# TTU UPDATE
-# =====================================================
-
-TTU["tick"]+=1
-
-phi,gamma,phase,K,refresh=ttu_update(
-    TTU["rho"],TTU["tick"]
+tab1, tab2, tab3 = st.tabs(
+    ["💬 Messagerie", "📸 Publier", "🔴 Live"]
 )
 
-TTU["rho"]*=0.996
-
-with st.expander("🔥 État du Tunnel"):
-
-    st.progress(phi)
-    st.metric("Phase",phase)
-    st.metric("Synchronisation",f"{(1-gamma)*100:.1f}%")
-
 # =====================================================
-# FLUX
+# 💬 MESSAGERIE FLUIDE TTU
 # =====================================================
 
-for m in reversed(NODE["TUNNELS"][sid][-40:]):
+with tab1:
 
-    raw=SOVEREIGN.decrypt(secret,m["d"])
+    st.subheader("Conversation temps réel")
 
-    if raw:
+    for msg in db["messages"][-50:]:
 
-        st.markdown(f"**{m['u']}**")
+        if msg["type"] == "text":
+            st.write(f"**{msg['user']}** : {msg['content']}")
 
-        if m["t"]=="text":
-            st.markdown(
-                f"<div class='msg-box'>{raw.decode()}</div>",
-                unsafe_allow_html=True)
+        elif msg["type"] == "image":
+            st.image(msg["content"], width=250,
+                     caption=msg["user"])
 
-        elif m["t"]=="image":
-            st.image(raw)
+        elif msg["type"] == "video":
+            st.video(msg["content"])
 
-        elif "video" in m["t"]:
-            st.video(raw)
+    st.divider()
 
-        elif m["t"]=="audio":
-            st.audio(raw)
+    col1, col2 = st.columns([4,1])
+
+    with col1:
+        message = st.text_input("Message", key="msg")
+
+    with col2:
+        if st.button("Envoyer"):
+            if message:
+                db["messages"].append({
+                    "user": st.session_state.user,
+                    "type": "text",
+                    "content": message,
+                    "time": time.time()
+                })
+                save_db(db)
+                st.rerun()
 
 # =====================================================
-# HORLOGE TTU ADAPTATIVE
+# 📸 PUBLICATION PHOTO / VIDEO
 # =====================================================
 
-if "last_refresh" not in st.session_state:
-    st.session_state.last_refresh=0
+with tab2:
 
-if time.time()-st.session_state.last_refresh>refresh:
-    st.session_state.last_refresh=time.time()
-    time.sleep(0.2)
-    st.rerun()
+    st.subheader("Publier")
+
+    uploaded = st.file_uploader(
+        "Photo ou vidéo",
+        type=["png","jpg","jpeg","mp4","mov"]
+    )
+
+    if uploaded:
+
+        file_path = f"media_{time.time()}_{uploaded.name}"
+
+        with open(file_path, "wb") as f:
+            f.write(uploaded.read())
+
+        if uploaded.type.startswith("image"):
+            db["messages"].append({
+                "user": st.session_state.user,
+                "type": "image",
+                "content": file_path,
+                "time": time.time()
+            })
+
+        else:
+            db["messages"].append({
+                "user": st.session_state.user,
+                "type": "video",
+                "content": file_path,
+                "time": time.time()
+            })
+
+        save_db(db)
+
+        st.success("Publié dans le tunnel ✅")
+        st.rerun()
+
+# =====================================================
+# 🔴 LIVE TTU STABLE (ANTI CRASH)
+# =====================================================
+
+with tab3:
+
+    st.subheader("Live du Tunnel")
+
+    st.info(
+        "🎥 Pour un live stable Streamlit Cloud, "
+        "utiliser caméra téléphone + upload continu."
+    )
+
+    live_video = st.file_uploader(
+        "Envoyer une vidéo LIVE",
+        type=["mp4","mov"],
+        key="live"
+    )
+
+    if live_video:
+
+        live_path = f"live_{time.time()}.mp4"
+
+        with open(live_path, "wb") as f:
+            f.write(live_video.read())
+
+        db["lives"].append({
+            "user": st.session_state.user,
+            "video": live_path,
+            "time": time.time()
+        })
+
+        save_db(db)
+        st.success("🔴 LIVE lancé")
+
+    st.divider()
+
+    st.subheader("Lives actifs")
+
+    for live in reversed(db["lives"][-5:]):
+        st.write(f"🔴 {live['user']} en direct")
+        st.video(live["video"])
+
+# =====================================================
+# FOOTER TTU
+# =====================================================
+
+st.caption("TTU-MC³ Stream Architecture — Anti Crash Mode")
