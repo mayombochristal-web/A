@@ -207,17 +207,23 @@ def push(data,typ):
 
 with st.expander("➕ PUBLIER / LIVE",expanded=True):
 
-    tab1,tab2,tab3,tab4=st.tabs(
-        ["💬 Texte","📷 Caméra","🎤 Micro","🎥 LIVE"]
+    st.divider()
+st.subheader("🎥 LIVE")
+
+if WEBRTC_AVAILABLE:
+
+    ctx = webrtc_streamer(
+        key=f"live-{sid}",
+        mode=WebRtcMode.SENDRECV,
+        media_stream_constraints={"video": True, "audio": True},
+        async_processing=True,
     )
 
-    # TEXT
-    with tab1:
-        txt=st.text_area("Message")
-        if st.button("Envoyer texte"):
-            if txt:
-                push(txt.encode(),"text")
-                st.rerun()
+    if ctx.state.playing:
+        NODE["LIVE"][sid] = st.session_state.uid
+
+else:
+    st.warning("LIVE indisponible (module WebRTC non installé)")
 
     # CAMERA
     with tab2:
