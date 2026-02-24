@@ -1,176 +1,178 @@
 import streamlit as st
-import uuid
-import time
+from cryptography.fernet import Fernet
+import hashlib, time, uuid, base64, json
 
-# =============================
-# INITIALISATION NODE V22
-# =============================
+# =====================================================
+# SAFE JSON SERIALIZATION
+# =====================================================
+def encode_fragments(frags):
+    return [base64.b64encode(f).decode("utf-8") for f in frags]
 
-if "NODE" not in st.session_state:
+def decode_fragments(frags):
+    return [base64.b64decode(f.encode("utf-8")) for f in frags]
 
-    st.session_state.NODE = {
-        "users": {},
-        "messages": {},
-        "subscriptions": {},
-        "discover": {},
-        "profile": None
-    }
-
-NODE = st.session_state.NODE
-
-
-# =============================
-# OUTILS
-# =============================
-
-def pair_id(a, b):
-    """Anti duplication conversation"""
-    return "_".join(sorted([a, b]))
-
-
-def ensure_profile():
-    if NODE["profile"] is None:
-        NODE["profile"] = {
-            "id": str(uuid.uuid4())[:8],
-            "name": "Utilisateur",
-            "bio": "",
-            "photo": None
-        }
-        NODE["users"][NODE["profile"]["id"]] = NODE["profile"]
-
-
-ensure_profile()
-ME = NODE["profile"]["id"]
-
-
-# =============================
-# SIDEBAR NAVIGATION
-# =============================
-
-st.sidebar.title("🌐 NDOLÔ V22")
-
-page = st.sidebar.radio(
-    "Navigation",
-    ["🏠 Accueil", "🔎 Découverte", "💬 Messages", "👤 Profil"]
+# =====================================================
+# CONFIG
+# =====================================================
+st.set_page_config(
+    page_title="GEN-Z GABON • FREE-KONGOSSA V16",
+    page_icon="🇬🇦",
+    layout="centered"
 )
 
-# =============================
-# ACCUEIL
-# =============================
+# =====================================================
+# NODE DATABASE
+# =====================================================
+@st.cache_resource
+def NODE():
+    return {
+        "TUNNELS": {},
+        "CHAIN": {},
+        "PRESENCE": {}
+    }
 
-if page == "🏠 Accueil":
+NODE = NODE()
 
-    st.title("Bienvenue sur NDOLÔ")
+# =====================================================
+# SOVEREIGN ENGINE
+# =====================================================
+class SOVEREIGN:
 
-    st.write("Réseau social conversationnel.")
+    @staticmethod
+    def tunnel(secret):
+        return hashlib.sha256(secret.encode()).hexdigest()[:20]
 
-    if st.button("Publier mon profil dans Découverte"):
-        NODE["discover"][ME] = NODE["profile"]
-        st.success("Profil publié ✔")
-
-
-# =============================
-# DECOUVERTE (SOCIAL STYLE)
-# =============================
-
-elif page == "🔎 Découverte":
-
-    st.title("Découvrir des utilisateurs")
-
-    for uid, user in NODE["discover"].items():
-
-        if uid == ME:
-            continue
-
-        col1, col2 = st.columns([1,4])
-
-        with col1:
-            st.write("👤")
-
-        with col2:
-            st.subheader(user["name"])
-            st.caption(user["bio"])
-
-            subscribed = uid in NODE["subscriptions"]
-
-            if not subscribed:
-                if st.button("S'abonner", key=f"sub{uid}"):
-                    NODE["subscriptions"][uid] = True
-                    st.success("Abonné ✔")
-                    st.rerun()
-            else:
-                if st.button("Se désabonner", key=f"unsub{uid}"):
-                    del NODE["subscriptions"][uid]
-                    st.rerun()
-
-        st.divider()
-
-
-# =============================
-# MESSAGERIE
-# =============================
-
-elif page == "💬 Messages":
-
-    st.title("Messages")
-
-    if not NODE["subscriptions"]:
-        st.info("Abonne-toi à quelqu’un pour discuter.")
-    else:
-
-        target = st.selectbox(
-            "Choisir une conversation",
-            list(NODE["subscriptions"].keys())
+    @staticmethod
+    def key(secret):
+        k=hashlib.pbkdf2_hmac(
+            "sha256",
+            secret.encode(),
+            b"GABON-SOVEREIGN",
+            150000
         )
+        return base64.urlsafe_b64encode(k[:32])
 
-        cid = pair_id(ME, target)
+    @staticmethod
+    def encrypt(secret,data):
+        f=Fernet(SOVEREIGN.key(secret))
+        c=f.encrypt(data)
+        n=len(c)
+        return [c[:n//3],c[n//3:2*n//3],c[2*n//3:]]
 
-        if cid not in NODE["messages"]:
-            NODE["messages"][cid] = []
+    @staticmethod
+    def decrypt(secret,frags):
+        f=Fernet(SOVEREIGN.key(secret))
+        return f.decrypt(b"".join(frags))
 
-        chat_box = st.container(height=400)
+# =====================================================
+# SESSION
+# =====================================================
+if "uid" not in st.session_state:
+    nick=st.text_input("Pseudo GEN-Z 🇬🇦")
+    if nick:
+        st.session_state.uid=f"🇬🇦{nick}#{uuid.uuid4().hex[:3]}"
+        st.rerun()
+    st.stop()
 
-        with chat_box:
-            for msg in NODE["messages"][cid]:
-                if msg["sender"] == ME:
-                    st.markdown(f"**Moi :** {msg['text']}")
-                else:
-                    st.markdown(f"**{msg['sender']} :** {msg['text']}")
+secret=st.text_input("Code Tunnel",type="password")
+if not secret:
+    st.stop()
 
-        message = st.text_input("Message")
+sid=SOVEREIGN.tunnel(secret)
 
-        if st.button("Envoyer") and message:
+if sid not in NODE["TUNNELS"]:
+    NODE["TUNNELS"][sid]=[]
+    NODE["CHAIN"][sid]=b"GENESIS"
 
-            NODE["messages"][cid].append({
-                "sender": ME,
-                "text": message,
-                "time": time.time()
-            })
+# =====================================================
+# PRESENCE
+# =====================================================
+now=time.time()
+NODE["PRESENCE"][st.session_state.uid]=now
+NODE["PRESENCE"]={u:t for u,t in NODE["PRESENCE"].items() if now-t<30}
 
-            st.rerun()
+st.title("🇬🇦 FREE-KONGOSSA — SOVEREIGN")
+st.caption(f"🟢 {len(NODE['PRESENCE'])} actifs")
 
+# =====================================================
+# DISPLAY
+# =====================================================
+for m in reversed(NODE["TUNNELS"][sid]):
+    try:
+        raw=SOVEREIGN.decrypt(secret,decode_fragments(m["f"]))
+        st.caption(m["u"])
 
-# =============================
-# PROFIL
-# =============================
+        if m["t"]=="text":
+            st.write(raw.decode())
+        elif "image" in m["t"]:
+            st.image(raw)
+        elif "video" in m["t"]:
+            st.video(raw)
+        else:
+            st.audio(raw)
 
-elif page == "👤 Profil":
+    except:
+        pass
 
-    st.title("Mon profil")
+# =====================================================
+# SEND
+# =====================================================
+mode=st.radio("Signal",["Texte","Média","Vocal"],horizontal=True)
 
-    name = st.text_input("Nom", NODE["profile"]["name"])
-    bio = st.text_area("Bio", NODE["profile"]["bio"])
+def push(data,typ):
 
-    photo = st.file_uploader("Photo de profil", type=["png","jpg","jpeg"])
+    frags=SOVEREIGN.encrypt(secret,data)
 
-    if st.button("Sauvegarder"):
-        NODE["profile"]["name"] = name
-        NODE["profile"]["bio"] = bio
-        NODE["profile"]["photo"] = photo
-        NODE["users"][ME] = NODE["profile"]
-        st.success("Profil mis à jour ✔")
+    prev=NODE["CHAIN"][sid]
+    chain=hashlib.sha256(prev+data).digest()
+    NODE["CHAIN"][sid]=chain
 
-    st.divider()
+    NODE["TUNNELS"][sid].append({
+        "u":st.session_state.uid,
+        "f":encode_fragments(frags),
+        "t":typ,
+        "ts":time.time()
+    })
 
-    st.subheader("Identité publique")
-    st.code(ME)
+if mode=="Texte":
+    txt=st.text_area("Message")
+    if st.button("Envoyer"):
+        push(txt.encode(),"text")
+        st.rerun()
+
+elif mode=="Média":
+    f=st.file_uploader("Upload")
+    if f and st.button("Diffuser"):
+        push(f.getvalue(),f.type)
+        st.rerun()
+
+elif mode=="Vocal":
+    a=st.audio_input("Micro")
+    if a and st.button("Vocal"):
+        push(a.getvalue(),"audio/wav")
+        st.rerun()
+
+# =====================================================
+# SYNC EXPORT / IMPORT
+# =====================================================
+st.divider()
+st.subheader("🌐 Sync Souverain")
+
+export_data=json.dumps(NODE["TUNNELS"][sid],ensure_ascii=False,indent=2)
+
+st.download_button(
+    "⬇️ Export Tunnel",
+    export_data,
+    file_name="kongossa_sync.json"
+)
+
+imp=st.file_uploader("Importer Sync")
+
+if imp:
+    incoming=json.loads(imp.read().decode("utf-8"))
+    NODE["TUNNELS"][sid].extend(incoming)
+    st.success("Fusion Node OK")
+    st.rerun()
+
+time.sleep(4)
+st.rerun()
