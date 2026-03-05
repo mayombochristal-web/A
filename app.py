@@ -20,7 +20,7 @@ ASSETS_FOLDER = "assets"      # Pour la photo du créateur
 os.makedirs(DATA_FOLDER, exist_ok=True)
 os.makedirs(ASSETS_FOLDER, exist_ok=True)
 
-BUCKET_NAME = "uploads"       # Nom du bucket Supabase
+BUCKET_NAME = "uploads"       # Nom du bucket Supabase (doit être public)
 
 # =====================================================
 # SÉCURITÉ : HACHAGE DES MOTS DE PASSE
@@ -29,11 +29,11 @@ def hash_password(password):
     return hashlib.sha256(str.encode(password)).hexdigest()
 
 # =====================================================
-# UPLOAD VERS SUPABASE STORAGE
+# UPLOAD VERS SUPABASE STORAGE (URL PUBLIQUE)
 # =====================================================
 def upload_to_storage(file_data, filename, content_type=None):
     """
-    Upload un fichier vers le bucket 'uploads' et retourne l'URL publique.
+    Upload un fichier vers le bucket 'uploads' (public) et retourne l'URL publique.
     file_data: bytes ou BytesIO
     filename: nom du fichier (unique de préférence)
     content_type: type MIME (optionnel)
@@ -47,6 +47,9 @@ def upload_to_storage(file_data, filename, content_type=None):
         )
         # Récupération de l'URL publique
         public_url = supabase.storage.from_(BUCKET_NAME).get_public_url(filename)
+        if not public_url:
+            st.error("L'URL publique n'a pas pu être générée.")
+            return None
         return public_url
     except Exception as e:
         st.error(f"Erreur d'upload : {e}")
@@ -188,11 +191,15 @@ def feed():
             media_url = upload_to_storage(video.getvalue(), filename, video.type)
             media_type = "video"
 
+        if not media_url:
+            st.error("L'upload a échoué, le message n'a pas été publié.")
+            st.stop()
+
         # Insertion du post dans Supabase
         post_dict = {
             "username": st.session_state.user,
             "text": text,
-            "media_path": media_url,      # On garde le même nom de colonne
+            "media_path": media_url,
             "media_type": media_type,
         }
         supabase.table("posts").insert(post_dict).execute()
@@ -331,24 +338,32 @@ def messenger():
             "recipient": target,
         }
 
+        url = None
         if audio_bytes is not None:
             filename = f"voice_{st.session_state.user}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.wav"
             url = upload_to_storage(audio_bytes, filename, "audio/wav")
-            message_dict["audio_path"] = url
+            if url:
+                message_dict["audio_path"] = url
         elif audio_file is not None:
             ext = audio_file.name.split('.')[-1]
             filename = f"audio_{st.session_state.user}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{ext}"
             url = upload_to_storage(audio_file.getvalue(), filename, audio_file.type)
-            message_dict["audio_path"] = url
+            if url:
+                message_dict["audio_path"] = url
         elif video_file is not None:
             ext = video_file.name.split('.')[-1]
             filename = f"video_{st.session_state.user}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{ext}"
             url = upload_to_storage(video_file.getvalue(), filename, video_file.type)
-            message_dict["video_path"] = url
+            if url:
+                message_dict["video_path"] = url
         elif text_msg.strip() != "":
             message_dict["text"] = text_msg
         else:
             st.warning("Écris un message, enregistre un audio ou ajoute un fichier.")
+            st.stop()
+
+        if url is None and "text" not in message_dict:
+            st.error("L'upload a échoué, le message n'a pas été envoyé.")
             st.stop()
 
         supabase.table("messages").insert(message_dict).execute()
