@@ -1,123 +1,66 @@
-🇬🇦 Free_Kogossa
+# 🌍 Free_Kogossa – Le réseau social libre et sécurisé
 
-Free_Kogossa est un réseau social expérimental léger construit avec Streamlit permettant :
-
-- publication de posts (texte + image)
-- commentaires
-- messagerie privée
-- profils utilisateurs
-- fil social communautaire
-
-L'application est conçue pour fonctionner sans serveur complexe, uniquement avec Streamlit et des fichiers JSON.
+**Free_Kogossa** est une plateforme sociale innovante développée avec **Streamlit** et **Supabase**. Elle offre un espace d’échange communautaire où la confidentialité, la simplicité et la richesse des médias sont au cœur de l’expérience.
 
 ---
 
-🚀 Fonctionnalités
+## ✨ Fonctionnalités principales
 
-📢 Fil social
+### 🔐 Sécurité et confidentialité
+- **Mots de passe hachés** (SHA‑256) – aucun stockage en clair.
+- **Authentification sécurisée** via Supabase.
+- **Données hébergées sur le cloud** (Supabase) – contrôle total et sauvegarde automatique.
+- **Absence de publicités et de pistage** – votre vie privée est respectée.
 
-- publier du texte
-- publier une image
-- commenter les publications
-- affichage chronologique
+### 🗣️ Fonctionnalités sociales
+- **Fil d’actualité** : publiez des messages, des images et des vidéos.
+- **Commentaires** : échangez sur les publications de la communauté.
+- **Messagerie privée** : conversations textuelles, vocales et vidéo en temps réel (rafraîchissement automatique).
+- **Enregistrement vocal** directement depuis le navigateur (microphone).
+- **Partage de fichiers** : images, vidéos, audios – le tout stocké dans le cloud.
 
-💬 Messagerie
+### 👤 Gestion de profil
+- **Photo de profil** (upload vers le cloud).
+- **Bio et localisation** modifiables.
+- **Changement de mot de passe** sécurisé.
+- **Bannière personnalisée** visible sur toutes les pages.
 
-- discussion privée entre utilisateurs
-- historique des conversations
-- tri chronologique des messages
+### 📊 Statistiques communautaires
+- Nombre d’utilisateurs et de publications affiché sur la page “À propos”.
 
-👤 Profil
-
-- photo de profil
-- bio
-- localisation
-- modification du profil
-
-🔐 Comptes utilisateurs
-
-- création de compte
-- connexion sécurisée par mot de passe
-
----
-
-🧑‍💻 Première utilisation
-
-Lors de votre première visite :
-
-1. ouvrir l’onglet Créer compte
-2. choisir un nom d’utilisateur
-3. choisir un mot de passe
-4. ajouter une photo de profil (optionnel)
-5. cliquer sur Créer compte
-
-Ensuite vous pourrez utiliser l’onglet Connexion.
+### ⚡ Expérience utilisateur optimisée
+- **Rafraîchissement automatique** (feed toutes les 5s, messagerie toutes les 2s) pour une sensation temps réel.
+- Interface responsive, adaptée aux mobiles et ordinateurs.
+- Design clair et intuitif.
 
 ---
 
-⚠️ Message "Identifiants incorrects"
+## 🛠️ Architecture technique
 
-Ce message signifie que :
-
-- le nom d'utilisateur n'existe pas
-- ou le mot de passe est incorrect
-
-Si c'est votre première visite, vous devez créer un compte avant de vous connecter.
+- **Frontend / Backend** : [Streamlit](https://streamlit.io) – framework Python pour applications data.
+- **Base de données** : [Supabase](https://supabase.com) – PostgreSQL + authentification + storage.
+- **Stockage média** : Bucket `uploads` sur Supabase Storage.
+- **Sécurité** : Hachage SHA‑256, politiques RLS (Row Level Security) dans Supabase.
 
 ---
 
-📂 Structure du projet
+## 🚀 Guide d’installation et déploiement
 
-app.py
-data/
-   users.json
-   posts.json
-   messages.json
+### 1. Prérequis
+- Python 3.9 ou supérieur
+- Un compte [Supabase](https://supabase.com) (gratuit)
+- (Optionnel) Compte [Streamlit Cloud](https://streamlit.io/cloud) pour le déploiement
 
-Les données sont stockées localement dans le dossier data.
+### 2. Installation locale
 
----
+```bash
+# Cloner le dépôt
+git clone https://github.com/votre-repo/free_kogossa.git
+cd free_kogossa
 
-🛠 Installation locale
+# Créer un environnement virtuel
+python -m venv venv
+source venv/bin/activate  # ou venv\Scripts\activate sous Windows
 
-Installer Streamlit :
-
-pip install streamlit
-
-Lancer l'application :
-
-streamlit run app.py
-
----
-
-☁️ Déploiement Streamlit Cloud
-
-1. créer un dépôt GitHub
-2. ajouter app.py
-3. déployer sur Streamlit Cloud
-
-Aucune base de données externe n'est nécessaire.
-
----
-
-⚙️ Limites actuelles
-
-- stockage JSON (pas optimisé pour très grande échelle)
-- pas de notifications en temps réel
-- pas de système de followers
-
----
-
-🌍 Projet
-
-Free_Kogossa est un prototype de réseau social souverain simple conçu pour expérimenter :
-
-- interaction sociale
-- communication communautaire
-- publication libre
-
----
-
-📜 Licence
-
-Projet open source expérimental.
+# Installer les dépendances
+pip install -r requirements.txt
