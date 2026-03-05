@@ -7,14 +7,15 @@ import time
 import uuid
 import base64
 import math
+import re
 
 # =====================================================
 # CONFIG
 # =====================================================
 
 st.set_page_config(
-    page_title="GEN-Z GABON FREE-KONGOSSA",
-    page_icon="🇬🇦",
+    page_title="Free Kongossa",
+    page_icon="🔥",
     layout="centered"
 )
 
@@ -38,16 +39,11 @@ margin-bottom:10px;
 border-left:4px solid #00c853;
 }
 
-.login{
+.story{
 background:#161b22;
-padding:30px;
-border-radius:15px;
-text-align:center;
-}
-
-.like{
-color:#ff4081;
-font-size:18px;
+padding:10px;
+border-radius:10px;
+margin-bottom:10px;
 }
 
 </style>
@@ -67,22 +63,18 @@ def ttu_update(rho,tick):
     gamma=math.exp(-4*phi)
 
     if phi<0.3:
-        phase="😴 Tunnel calme"
         refresh=7000
     elif phi<0.6:
-        phase="🟢 Discussions actives"
         refresh=4000
     elif phi<0.85:
-        phase="⚡ Tunnel chaud"
         refresh=2000
     else:
-        phase="🔥 VIRAL"
         refresh=1000
 
-    return phi,gamma,phase,K,refresh
+    return phi,gamma,refresh
 
 # =====================================================
-# CRYPTO ENGINE
+# CRYPTO
 # =====================================================
 
 class SOVEREIGN:
@@ -139,7 +131,13 @@ def get_node():
         "messages":{},
         "presence":{},
         "likes":{},
+        "comments":{},
+        "reposts":{},
+        "stories":{},
+        "followers":{},
+        "hashtags":{},
         "live":{},
+        "live_chat":{},
         "ttu":{}
 
     }
@@ -152,14 +150,12 @@ NODE=get_node()
 
 if "uid" not in st.session_state:
 
-    st.markdown("<div class='login'>",unsafe_allow_html=True)
-
-    st.title("🇬🇦 GEN-Z GABON")
+    st.title("🔥 Free Kongossa")
 
     pseudo=st.text_input("Pseudo")
     secret=st.text_input("Code Tunnel",type="password")
 
-    if st.button("ENTRER"):
+    if st.button("Entrer"):
 
         if pseudo and secret:
 
@@ -167,8 +163,6 @@ if "uid" not in st.session_state:
             st.session_state.secret=secret
 
             st.rerun()
-
-    st.markdown("</div>",unsafe_allow_html=True)
 
     st.stop()
 
@@ -181,7 +175,12 @@ sid=SOVEREIGN.tunnel(secret)
 
 NODE["messages"].setdefault(sid,[])
 NODE["likes"].setdefault(sid,{})
+NODE["comments"].setdefault(sid,{})
+NODE["reposts"].setdefault(sid,{})
 NODE["live"].setdefault(sid,None)
+NODE["live_chat"].setdefault(sid,[])
+NODE["stories"].setdefault(sid,[])
+NODE["followers"].setdefault(st.session_state.uid,set())
 NODE["ttu"].setdefault(sid,{"rho":0.2,"tick":0})
 
 TTU=NODE["ttu"][sid]
@@ -192,21 +191,22 @@ TTU=NODE["ttu"][sid]
 
 now=time.time()
 
-NODE["presence"][st.session_state.uid]={
-"ts":now,
-"sid":sid
-}
+NODE["presence"][st.session_state.uid]={"ts":now,"sid":sid}
 
 active=[u for u,d in NODE["presence"].items()
         if now-d["ts"]<30 and d["sid"]==sid]
 
 # =====================================================
-# MESSAGE PUSH
+# PUSH POST
 # =====================================================
 
 def push(data,typ):
 
     mid=str(uuid.uuid4())
+
+    text=data.decode() if typ=="text" else ""
+
+    hashtags=re.findall(r"#(\w+)",text)
 
     NODE["messages"][sid].append({
 
@@ -219,127 +219,129 @@ def push(data,typ):
     })
 
     NODE["likes"][sid][mid]=0
+    NODE["comments"][sid][mid]=[]
+    NODE["reposts"][sid][mid]=0
 
-    NODE["messages"][sid]=NODE["messages"][sid][-200:]
+    for h in hashtags:
 
-    TTU["rho"]=min(1.3,TTU["rho"]+0.02)
-
-# =====================================================
-# LIKE
-# =====================================================
-
-def like(mid):
-
-    NODE["likes"][sid][mid]+=1
+        NODE["hashtags"].setdefault(h,0)
+        NODE["hashtags"][h]+=1
 
 # =====================================================
-# UI
+# STORIES 24H
 # =====================================================
 
-st.title("🏠 Flux Souverain")
+def push_story(data):
 
-st.write(f"🟢 {len(active)} membres en ligne")
+    NODE["stories"][sid].append({
+
+        "u":st.session_state.uid,
+        "d":SOVEREIGN.encrypt(secret,data),
+        "ts":time.time()
+
+    })
 
 # =====================================================
-# POST
+# VIRAL SCORE
 # =====================================================
 
-with st.expander("➕ Publier",expanded=True):
+def score(m):
 
-    tab1,tab2,tab3,tab4=st.tabs(
-        ["💬 Texte","📸 Média","🎙️ Vocal","🔴 Live"]
-    )
+    likes=NODE["likes"][sid][m["id"]]
+    reposts=NODE["reposts"][sid][m["id"]]
 
-    # TEXT
-    with tab1:
+    age=time.time()-m["ts"]
 
-        txt=st.text_area("Message")
+    return likes*3 + reposts*5 - age/500
 
-        if st.button("Envoyer texte"):
+# =====================================================
+# UI HEADER
+# =====================================================
 
-            if txt:
+st.title("🔥 Free Kongossa")
 
-                push(txt.encode(),"text")
-                st.rerun()
+st.write(f"🟢 {len(active)} en ligne")
 
-    # MEDIA
-    with tab2:
+# =====================================================
+# STORIES
+# =====================================================
 
-        img=st.camera_input("Photo")
+st.subheader("📸 Stories 24h")
 
-        file=st.file_uploader(
-            "Envoyer média",
-            type=["png","jpg","jpeg","mp4"]
-        )
+for s in NODE["stories"][sid]:
 
-        if img and st.button("Publier photo"):
+    if time.time()-s["ts"]<86400:
 
-            push(img.getvalue(),"image")
-            st.rerun()
+        raw=SOVEREIGN.decrypt(secret,s["d"])
 
-        if file and st.button("Publier fichier"):
+        if raw:
 
-            push(file.getvalue(),file.type)
-            st.rerun()
+            st.markdown(f"**{s['u']}**")
+            st.image(raw)
 
-    # AUDIO
-    with tab3:
+story=st.camera_input("Poster une story")
 
-        audio=st.audio_input("Vocal")
+if story and st.button("Publier story"):
 
-        if audio and st.button("Envoyer vocal"):
+    push_story(story.getvalue())
+    st.rerun()
 
-            push(audio.getvalue(),"audio")
-            st.rerun()
+# =====================================================
+# POST CREATION
+# =====================================================
 
-    # LIVE
-    with tab4:
+txt=st.text_area("Exprime toi...")
 
-        if NODE["live"][sid] is None:
+if st.button("Publier"):
 
-            if st.button("🔴 Start Live"):
+    if txt:
 
-                NODE["live"][sid]=st.session_state.uid
-                TTU["rho"]+=0.1
-                st.rerun()
+        push(txt.encode(),"text")
+        st.rerun()
 
-        else:
-
-            st.success(
-                f"🔴 LIVE par {NODE['live'][sid]}"
-            )
-
-            if NODE["live"][sid]==st.session_state.uid:
-
-                if st.button("Stop Live"):
-
-                    NODE["live"][sid]=None
-                    st.rerun()
+# =====================================================
+# LIVE
+# =====================================================
 
 st.divider()
 
+if NODE["live"][sid] is None:
+
+    if st.button("🔴 Démarrer Live"):
+
+        NODE["live"][sid]=st.session_state.uid
+        st.rerun()
+
+else:
+
+    st.success(f"🔴 LIVE par {NODE['live'][sid]}")
+
+    for c in NODE["live_chat"][sid][-30:]:
+
+        st.write(f"**{c['u']}** : {c['t']}")
+
+    msg=st.text_input("Chat live")
+
+    if st.button("Envoyer chat"):
+
+        NODE["live_chat"][sid].append({
+
+            "u":st.session_state.uid,
+            "t":msg
+
+        })
+
+        st.rerun()
+
 # =====================================================
-# TTU UPDATE
+# FEED VIRAL
 # =====================================================
 
-TTU["tick"]+=1
+st.divider()
 
-phi,gamma,phase,K,refresh=ttu_update(
-TTU["rho"],TTU["tick"])
+posts=sorted(NODE["messages"][sid],key=score,reverse=True)
 
-TTU["rho"]*=0.996
-
-with st.expander("🔥 État du tunnel"):
-
-    st.progress(phi)
-    st.write(phase)
-    st.write(f"Synchronisation {(1-gamma)*100:.1f}%")
-
-# =====================================================
-# FEED
-# =====================================================
-
-for m in reversed(NODE["messages"][sid][-60:]):
+for m in posts[-60:]:
 
     raw=SOVEREIGN.decrypt(secret,m["d"])
 
@@ -347,39 +349,72 @@ for m in reversed(NODE["messages"][sid][-60:]):
 
         st.markdown(f"**{m['u']}**")
 
-        if m["t"]=="text":
+        st.markdown(
+        f"<div class='msg'>{raw.decode()}</div>",
+        unsafe_allow_html=True)
 
-            st.markdown(
-            f"<div class='msg'>{raw.decode()}</div>",
-            unsafe_allow_html=True)
+        col1,col2,col3=st.columns(3)
 
-        elif m["t"]=="image":
+        if col1.button("❤️",key=m["id"]):
 
-            st.image(raw)
+            NODE["likes"][sid][m["id"]]+=1
+            st.rerun()
 
-        elif "video" in m["t"]:
+        if col2.button("🔁",key="r"+m["id"]):
 
-            st.video(raw)
+            NODE["reposts"][sid][m["id"]]+=1
+            push(raw,"text")
+            st.rerun()
 
-        elif m["t"]=="audio":
+        col3.write(
+        f"{NODE['likes'][sid][m['id']]} ❤️ | {NODE['reposts'][sid][m['id']]} 🔁"
+        )
 
-            st.audio(raw)
+        # commentaires
+        with st.expander("💬 commentaires"):
 
-        col1,col2=st.columns([1,6])
+            for c in NODE["comments"][sid][m["id"]]:
 
-        with col1:
+                st.write(f"**{c['u']}** : {c['t']}")
 
-            if st.button("❤️",
-                key=m["id"]):
+            new=st.text_input("commenter",key="c"+m["id"])
 
-                like(m["id"])
+            if st.button("envoyer",key="b"+m["id"]):
+
+                NODE["comments"][sid][m["id"]].append({
+
+                    "u":st.session_state.uid,
+                    "t":new
+
+                })
+
                 st.rerun()
 
-        with col2:
+# =====================================================
+# HASHTAGS TRENDING
+# =====================================================
 
-            st.write(
-            f"{NODE['likes'][sid][m['id']]} likes"
-            )
+st.divider()
+
+st.subheader("🔥 Trending")
+
+for h,c in sorted(
+NODE["hashtags"].items(),
+key=lambda x:x[1],
+reverse=True)[:10]:
+
+    st.write(f"#{h} ({c})")
+
+# =====================================================
+# TTU
+# =====================================================
+
+TTU["tick"]+=1
+
+phi,gamma,refresh=ttu_update(
+TTU["rho"],TTU["tick"])
+
+st.progress(phi)
 
 # =====================================================
 # AUTO REFRESH
@@ -387,5 +422,5 @@ for m in reversed(NODE["messages"][sid][-60:]):
 
 st_autorefresh(
 interval=refresh,
-key="tunnel_refresh"
+key="refresh"
 )
