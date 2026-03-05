@@ -12,7 +12,7 @@ from streamlit_webrtc import webrtc_streamer, WebRtcMode
 # =====================================================
 
 st.set_page_config(
-    page_title="SovereignNet",
+    page_title="Free_Kongossa",
     page_icon="🌐",
     layout="wide"
 )
