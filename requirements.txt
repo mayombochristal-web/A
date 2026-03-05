@@ -1,6 +1,7 @@
 streamlit
-cryptography
 streamlit-autorefresh
-
+streamlit-webrtc
+cryptography
+pandas
 
 
