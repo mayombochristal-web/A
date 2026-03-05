@@ -1,6 +1,7 @@
 import streamlit as st
 import json
 import os
+import hashlib
 from datetime import datetime
 from streamlit_autorefresh import st_autorefresh
 from streamlit_mic_recorder import mic_recorder
@@ -20,6 +21,13 @@ os.makedirs(DATA_FOLDER, exist_ok=True)
 os.makedirs(ASSETS_FOLDER, exist_ok=True)
 
 # =====================================================
+# SÉCURITÉ : HACHAGE DES MOTS DE PASSE
+# =====================================================
+def hash_password(password):
+    """Retourne le hash SHA‑256 du mot de passe."""
+    return hashlib.sha256(str.encode(password)).hexdigest()
+
+# =====================================================
 # JSON UTILS
 # =====================================================
 def load_json(file):
@@ -36,7 +44,7 @@ def save_json(file, data):
         json.dump(data, f, indent=2)
 
 # =====================================================
-# LOAD DATA
+# CHARGEMENT INITIAL DES DONNÉES
 # =====================================================
 users = load_json(USERS_FILE)
 posts = load_json(POSTS_FILE)
@@ -49,17 +57,19 @@ if "user" not in st.session_state:
     st.session_state.user = None
 
 # =====================================================
-# LOGIN / REGISTER
+# LOGIN / REGISTER (AVEC HACHAGE)
 # =====================================================
 def login():
     st.title("🌍 Free_Kogossa")
+    st.info("🔐 Les mots de passe sont désormais hachés. Les anciens comptes ne sont plus valides, veuillez en créer un nouveau.")
+    
     tab1, tab2 = st.tabs(["Connexion", "Créer compte"])
 
     with tab1:
         username = st.text_input("Nom utilisateur")
         password = st.text_input("Mot de passe", type="password")
         if st.button("Connexion"):
-            if username in users and users[username]["password"] == password:
+            if username in users and users[username]["password"] == hash_password(password):
                 st.session_state.user = username
                 st.rerun()
             else:
@@ -75,6 +85,8 @@ def login():
         if st.button("Créer compte"):
             if new_user in users:
                 st.error("Utilisateur existe déjà")
+            elif len(new_pass) < 4:
+                st.error("Mot de passe trop court (minimum 4 caractères)")
             else:
                 pic_path = ""
                 if pic:
@@ -83,17 +95,17 @@ def login():
                         f.write(pic.getbuffer())
 
                 users[new_user] = {
-                    "password": new_pass,
+                    "password": hash_password(new_pass),  # Stockage haché
                     "bio": bio,
                     "location": location,
                     "profile_pic": pic_path,
                     "created": str(datetime.now())
                 }
                 save_json(USERS_FILE, users)
-                st.success("Compte créé")
+                st.success("Compte créé ! Vous pouvez maintenant vous connecter.")
 
 # =====================================================
-# PROFILE BANNER
+# BANNIERE DE PROFIL
 # =====================================================
 def banner():
     user = st.session_state.user
@@ -115,10 +127,11 @@ def banner():
     st.divider()
 
 # =====================================================
-# SOCIAL FEED (avec vidéos)
+# FIL SOCIAL (AVEC VIDÉOS ET LIMITATION À 20 POSTS)
 # =====================================================
 def feed():
-    st_autorefresh(interval=3000, key="feed_refresh")
+    # Auto‑refresh toutes les 5 secondes (moins de charge serveur)
+    st_autorefresh(interval=5000, key="feed_refresh")
     banner()
     st.subheader("Exprime toi")
 
@@ -159,34 +172,36 @@ def feed():
         st.rerun()
 
     st.divider()
-    ordered = sorted(posts.items(), key=lambda x: x[1]["time"], reverse=True)
+    # OPTIMISATION : afficher seulement les 20 derniers posts
+    ordered = sorted(posts.items(), key=lambda x: x[1]["time"], reverse=True)[:20]
 
     for pid, post in ordered:
-        st.subheader(post["user"])
-        st.write(post["text"])
+        with st.container():
+            st.subheader(f"@{post['user']}")
+            st.write(post["text"])
 
-        media_path = post.get("media_path", "")
-        media_type = post.get("media_type")
-        if media_path and os.path.exists(media_path):
-            if media_type == "image":
-                st.image(media_path)
-            elif media_type == "video":
-                st.video(media_path)
+            media_path = post.get("media_path", "")
+            media_type = post.get("media_type")
+            if media_path and os.path.exists(media_path):
+                if media_type == "image":
+                    st.image(media_path)
+                elif media_type == "video":
+                    st.video(media_path)
 
-        st.caption(datetime.fromtimestamp(post["time"]))
+            st.caption(datetime.fromtimestamp(post["time"]))
 
-        comment = st.text_input("Commenter", key=f"c{pid}")
-        if st.button("Envoyer", key=f"b{pid}"):
-            post["comments"].append({"user": st.session_state.user, "text": comment})
-            save_json(POSTS_FILE, posts)
-            st.rerun()
+            comment = st.text_input("Commenter", key=f"c{pid}")
+            if st.button("Envoyer", key=f"b{pid}"):
+                post["comments"].append({"user": st.session_state.user, "text": comment})
+                save_json(POSTS_FILE, posts)
+                st.rerun()
 
-        for c in post["comments"]:
-            st.write(f"**{c['user']}** : {c['text']}")
-        st.divider()
+            for c in post["comments"]:
+                st.write(f"**{c['user']}** : {c['text']}")
+            st.divider()
 
 # =====================================================
-# MESSENGER (avec correction enregistrement vocal)
+# MESSAGERIE (CORRECTION ENREGISTREMENT VOCAL)
 # =====================================================
 def messenger():
     st_autorefresh(interval=2000, key="msg_refresh")
@@ -240,7 +255,7 @@ def messenger():
         )
 
     if st.button("Envoyer message", type="primary"):
-        # Traitement de l'enregistrement vocal
+        # Extraction des bytes de l'enregistrement
         audio_bytes = None
         if recorder_output is not None:
             if isinstance(recorder_output, dict):
@@ -300,7 +315,7 @@ def messenger():
             st.warning("Écris un message, enregistre un audio ou ajoute un fichier.")
 
 # =====================================================
-# PROFILE
+# PROFIL (AVEC MODIFICATION DU MOT DE PASSE)
 # =====================================================
 def profile():
     user = st.session_state.user
@@ -314,12 +329,12 @@ def profile():
     st.write("Localisation :", users[user].get("location", ""))
     st.caption("Compte créé : " + users[user]["created"])
 
-    st.subheader("Modifier")
+    st.subheader("Modifier les informations")
     new_bio = st.text_area("Bio", value=users[user].get("bio", ""))
     new_loc = st.text_input("Localisation", value=users[user].get("location", ""))
     new_pic = st.file_uploader("Changer photo", type=["png", "jpg", "jpeg"])
 
-    if st.button("Mettre à jour profil"):
+    if st.button("Mettre à jour le profil"):
         users[user]["bio"] = new_bio
         users[user]["location"] = new_loc
         if new_pic:
@@ -329,6 +344,25 @@ def profile():
             users[user]["profile_pic"] = path
         save_json(USERS_FILE, users)
         st.rerun()
+
+    st.divider()
+    st.subheader("Sécurité")
+    with st.expander("Modifier le mot de passe"):
+        old_pass = st.text_input("Ancien mot de passe", type="password")
+        new_pass1 = st.text_input("Nouveau mot de passe", type="password")
+        new_pass2 = st.text_input("Confirmer le nouveau mot de passe", type="password")
+
+        if st.button("Changer le mot de passe"):
+            if users[user]["password"] != hash_password(old_pass):
+                st.error("Ancien mot de passe incorrect")
+            elif new_pass1 != new_pass2:
+                st.error("Les nouveaux mots de passe ne correspondent pas")
+            elif len(new_pass1) < 4:
+                st.error("Le mot de passe doit contenir au moins 4 caractères")
+            else:
+                users[user]["password"] = hash_password(new_pass1)
+                save_json(USERS_FILE, users)
+                st.success("Mot de passe modifié avec succès !")
 
 # =====================================================
 # À PROPOS / CRÉATEUR
