@@ -160,9 +160,9 @@ def feed():
         img = st.file_uploader("Image", type=["png", "jpg", "jpeg"], key="feed_img")
     with col_vid:
         video = st.file_uploader("Vidéo", type=["mp4", "mov", "avi", "mkv"], key="feed_video")
-    if img and img.size > 50 * 1024 * 1024:
-    st.error("Cette image est trop lourde (max 50 Mo)")
-if video and video.size > 50 * 1024 * 1024:
+   if img and img.size > 50 * 1024 * 1024:
+    st.error("Cette image est trop lourde (max 50 Mo)") # Erreur d'alignement ici
+if video and video.size > 50 * 1024 * 1024: # Erreur d'alignement ici
     st.error("Cette vidéo dépasse la limite de 50 Mo de Supabase")
 
     if st.button("Publier"):
