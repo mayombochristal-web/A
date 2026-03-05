@@ -258,13 +258,12 @@ def messenger():
 
     with col4:
         st.write("🎙️ Enregistrement vocal")
-        audio_bytes = audio_recorder(
-            text="Clique pour enregistrer",
-            recording_color="#e74c3c",
-            neutral_color="#6aa36f",
-            icon_name="microphone",
-            key="voice_recorder"
-        )
+        audio_bytes = mic_recorder(
+    start_prompt="🎙️ Démarrer l'enregistrement",
+    stop_prompt="⏹️ Arrêter",
+    just_once=False,
+    key="recorder"
+)
 
     # Bouton d'envoi unique (gère tous les types)
     if st.button("Envoyer message", type="primary"):
