@@ -1,231 +1,429 @@
-# =========================================================
-# FREE_KOGOSSA — SOCIAL AI NETWORK
-# Interface style WhatsApp
-# =========================================================
-
 import streamlit as st
-import uuid
-import time
+from cryptography.fernet import Fernet
+from streamlit_autorefresh import st_autorefresh
 
-# =========================================================
+import hashlib
+import time
+import uuid
+import base64
+import math
+
+# =====================================================
 # CONFIG
-# =========================================================
+# =====================================================
 
 st.set_page_config(
-    page_title="Free_Kogossa",
-    layout="wide"
+    page_title="GEN-Z GABON FREE-KONGOSSA",
+    page_icon="🇬🇦",
+    layout="centered"
 )
 
-st.title("🌍 Free_Kogossa")
+# =====================================================
+# STYLE
+# =====================================================
 
-# =========================================================
-# SESSION STATE INIT
-# =========================================================
+st.markdown("""
+<style>
 
-if "user_id" not in st.session_state:
-    st.session_state.user_id = str(uuid.uuid4())[:8]
+.stApp{
+background:#0e1117;
+color:white;
+}
 
-if "username" not in st.session_state:
-    st.session_state.username = "User_" + st.session_state.user_id
+.msg{
+padding:12px;
+border-radius:12px;
+background:#1c1c1c;
+margin-bottom:10px;
+border-left:4px solid #00c853;
+}
 
-if "tunnels" not in st.session_state:
-    st.session_state.tunnels = []
+.login{
+background:#161b22;
+padding:30px;
+border-radius:15px;
+text-align:center;
+}
 
-if "messages" not in st.session_state:
-    st.session_state.messages = {}
+.tunnelcard{
+background:#1c1c1c;
+padding:10px;
+border-radius:10px;
+margin-bottom:10px;
+}
 
-if "posts" not in st.session_state:
-    st.session_state.posts = []
+</style>
+""",unsafe_allow_html=True)
 
-# =========================================================
-# HEADER
-# =========================================================
+# =====================================================
+# TTU ENGINE
+# =====================================================
 
-st.sidebar.title("👤 Profil")
+def ttu_update(rho,tick):
 
-username = st.sidebar.text_input(
-    "Nom utilisateur",
-    value=st.session_state.username
-)
+    K=25+5*math.sin(tick*0.2)
 
-st.session_state.username = username
+    phi=0.5+0.5*math.tanh(2.5*(rho-0.4))-(K/200)
+    phi=max(0,min(1,phi))
 
-st.sidebar.write("ID:", st.session_state.user_id)
+    gamma=math.exp(-4*phi)
 
-# =========================================================
-# ONGLET PRINCIPAL
-# =========================================================
-
-tab_chat, tab_actu, tab_group = st.tabs(
-    ["💬 Discussion", "📢 Actu", "🌐 Communautés"]
-)
-
-# =========================================================
-# DISCUSSION
-# =========================================================
-
-with tab_chat:
-
-    st.subheader("💬 Messagerie")
-
-    if len(st.session_state.tunnels) == 0:
-        st.info("Aucun tunnel disponible.")
+    if phi<0.3:
+        phase="😴 Tunnel calme"
+        refresh=7000
+    elif phi<0.6:
+        phase="🟢 Discussions actives"
+        refresh=4000
+    elif phi<0.85:
+        phase="⚡ Tunnel chaud"
+        refresh=2000
     else:
+        phase="🔥 VIRAL"
+        refresh=1000
 
-        tunnel_names = [t["name"] for t in st.session_state.tunnels]
+    return phi,gamma,phase,K,refresh
 
-        selected = st.selectbox(
-            "Choisir Tunnel",
-            tunnel_names
+# =====================================================
+# CRYPTO ENGINE
+# =====================================================
+
+class SOVEREIGN:
+
+    @staticmethod
+    def tunnel(secret):
+        return hashlib.sha256(secret.encode()).hexdigest()[:20]
+
+    @staticmethod
+    def key(secret):
+
+        k=hashlib.pbkdf2_hmac(
+            "sha256",
+            secret.encode(),
+            b"SOVEREIGN-GABON",
+            150000
         )
 
-        tunnel = next(t for t in st.session_state.tunnels if t["name"] == selected)
+        return base64.urlsafe_b64encode(k[:32])
 
-        st.markdown("---")
+    @staticmethod
+    def encrypt(secret,data):
 
-        st.write("### Tunnel :", tunnel["name"])
-        st.write("Créateur :", tunnel["creator"])
+        f=Fernet(SOVEREIGN.key(secret))
 
-        if selected not in st.session_state.messages:
-            st.session_state.messages[selected] = []
+        return base64.b64encode(
+            f.encrypt(data)
+        ).decode()
 
-        for msg in st.session_state.messages[selected]:
-            st.chat_message(msg["user"]).write(msg["text"])
+    @staticmethod
+    def decrypt(secret,data):
 
-        message = st.chat_input("Écrire message")
+        try:
 
-        if message:
+            f=Fernet(SOVEREIGN.key(secret))
 
-            st.session_state.messages[selected].append({
-                "user": st.session_state.username,
-                "text": message,
-                "time": time.time()
-            })
+            return f.decrypt(
+                base64.b64decode(data)
+            )
+
+        except:
+            return None
+
+# =====================================================
+# GLOBAL NODE
+# =====================================================
+
+@st.cache_resource
+def get_node():
+
+    return {
+
+        "messages":{},
+        "presence":{},
+        "likes":{},
+        "live":{},
+        "ttu":{},
+        "posts":{},
+        "tunnels":{}
+
+    }
+
+NODE=get_node()
+
+# =====================================================
+# LOGIN
+# =====================================================
+
+if "uid" not in st.session_state:
+
+    st.markdown("<div class='login'>",unsafe_allow_html=True)
+
+    st.title("🇬🇦 GEN-Z GABON")
+
+    pseudo=st.text_input("Pseudo")
+    secret=st.text_input("Code Tunnel",type="password")
+
+    if st.button("ENTRER"):
+
+        if pseudo and secret:
+
+            st.session_state.uid=f"{pseudo}#{uuid.uuid4().hex[:3]}"
+            st.session_state.secret=secret
 
             st.rerun()
 
-# =========================================================
+    st.markdown("</div>",unsafe_allow_html=True)
+    st.stop()
+
+# =====================================================
+# INIT
+# =====================================================
+
+secret=st.session_state.secret
+sid=SOVEREIGN.tunnel(secret)
+
+NODE["messages"].setdefault(sid,[])
+NODE["likes"].setdefault(sid,{})
+NODE["live"].setdefault(sid,None)
+NODE["ttu"].setdefault(sid,{"rho":0.2,"tick":0})
+NODE["posts"].setdefault(sid,[])
+
+TTU=NODE["ttu"][sid]
+
+# =====================================================
+# PRESENCE
+# =====================================================
+
+now=time.time()
+
+NODE["presence"][st.session_state.uid]={
+"ts":now,
+"sid":sid
+}
+
+active=[u for u,d in NODE["presence"].items()
+        if now-d["ts"]<30 and d["sid"]==sid]
+
+# =====================================================
+# MESSAGE PUSH
+# =====================================================
+
+def push(data,typ):
+
+    mid=str(uuid.uuid4())
+
+    NODE["messages"][sid].append({
+
+        "id":mid,
+        "u":st.session_state.uid,
+        "d":SOVEREIGN.encrypt(secret,data),
+        "t":typ,
+        "ts":time.time()
+
+    })
+
+    NODE["likes"][sid][mid]=0
+
+    NODE["messages"][sid]=NODE["messages"][sid][-200:]
+
+    TTU["rho"]=min(1.3,TTU["rho"]+0.02)
+
+# =====================================================
+# LIKE
+# =====================================================
+
+def like(mid):
+
+    NODE["likes"][sid][mid]+=1
+
+# =====================================================
+# HEADER
+# =====================================================
+
+st.title("🇬🇦 Free_Kogossa")
+
+st.write(f"🟢 {len(active)} membres en ligne")
+
+# =====================================================
+# NAVIGATION
+# =====================================================
+
+tab_chat,tab_actu,tab_com=st.tabs(
+["💬 Discussion","📢 Actu","🌐 Communautés"]
+)
+
+# =====================================================
+# DISCUSSION
+# =====================================================
+
+with tab_chat:
+
+    st.subheader("Tunnel")
+
+    with st.expander("➕ Publier",expanded=True):
+
+        tab1,tab2,tab3,tab4=st.tabs(
+        ["💬 Texte","📸 Média","🎙️ Vocal","🔴 Live"]
+        )
+
+        with tab1:
+
+            txt=st.text_area("Message",key="msgbox")
+
+            if st.button("Envoyer texte"):
+
+                if txt:
+
+                    push(txt.encode(),"text")
+                    st.session_state.msgbox=""
+                    st.rerun()
+
+        with tab2:
+
+            img=st.camera_input("Photo")
+
+            file=st.file_uploader(
+            "Envoyer média",
+            type=["png","jpg","jpeg","mp4"]
+            )
+
+            if img and st.button("Publier photo"):
+
+                push(img.getvalue(),"image")
+                st.rerun()
+
+            if file and st.button("Publier fichier"):
+
+                push(file.getvalue(),file.type)
+                st.rerun()
+
+        with tab3:
+
+            audio=st.audio_input("Vocal")
+
+            if audio and st.button("Envoyer vocal"):
+
+                push(audio.getvalue(),"audio")
+                st.rerun()
+
+        with tab4:
+
+            if NODE["live"][sid] is None:
+
+                if st.button("🔴 Start Live"):
+
+                    NODE["live"][sid]=st.session_state.uid
+                    TTU["rho"]+=0.1
+                    st.rerun()
+
+            else:
+
+                st.success(
+                f"🔴 LIVE par {NODE['live'][sid]}"
+                )
+
+                if NODE["live"][sid]==st.session_state.uid:
+
+                    if st.button("Stop Live"):
+
+                        NODE["live"][sid]=None
+                        st.rerun()
+
+    st.divider()
+
+    for m in reversed(NODE["messages"][sid][-60:]):
+
+        raw=SOVEREIGN.decrypt(secret,m["d"])
+
+        if raw:
+
+            st.markdown(f"**{m['u']}**")
+
+            if m["t"]=="text":
+                st.markdown(
+                f"<div class='msg'>{raw.decode()}</div>",
+                unsafe_allow_html=True)
+
+            elif m["t"]=="image":
+                st.image(raw)
+
+            elif "video" in m["t"]:
+                st.video(raw)
+
+            elif m["t"]=="audio":
+                st.audio(raw)
+
+            if st.button("❤️",key=m["id"]):
+                like(m["id"])
+                st.rerun()
+
+            st.write(
+            f"{NODE['likes'][sid][m['id']]} likes"
+            )
+
+# =====================================================
 # ACTU
-# =========================================================
+# =====================================================
 
 with tab_actu:
 
-    st.subheader("📢 Actu / Stories")
+    st.subheader("📢 Publications")
 
-    type_post = st.selectbox(
-        "Type de publication",
-        ["Texte", "Photo", "Vidéo", "Audio"]
-    )
+    post=st.text_area("Exprime toi")
 
-    text = st.text_area("Message")
+    if st.button("Publier actu"):
 
-    media = st.file_uploader(
-        "Ajouter média",
-        type=["png", "jpg", "mp4", "mp3"]
-    )
-
-    if st.button("Publier"):
-
-        st.session_state.posts.append({
-            "user": st.session_state.username,
-            "text": text,
-            "media": media,
-            "type": type_post,
-            "time": time.time()
+        NODE["posts"][sid].append({
+        "u":st.session_state.uid,
+        "txt":post,
+        "ts":time.time()
         })
 
-        st.success("Publié")
+        st.rerun()
 
-    st.markdown("---")
+    st.divider()
 
-    for post in reversed(st.session_state.posts):
+    for p in reversed(NODE["posts"][sid]):
 
-        st.write("👤", post["user"])
-        st.write(post["text"])
+        st.markdown(f"**{p['u']}**")
+        st.write(p["txt"])
+        st.caption(time.ctime(p["ts"]))
 
-        if post["media"]:
-
-            if post["type"] == "Photo":
-                st.image(post["media"])
-
-            elif post["type"] == "Vidéo":
-                st.video(post["media"])
-
-            elif post["type"] == "Audio":
-                st.audio(post["media"])
-
-        st.markdown("---")
-
-# =========================================================
+# =====================================================
 # COMMUNAUTÉS
-# =========================================================
+# =====================================================
 
-with tab_group:
+with tab_com:
 
-    st.subheader("🌐 Communautés / Tunnels")
+    st.subheader("🌐 Tunnel info")
 
-    st.markdown("### Créer Tunnel")
+    st.write("ID Tunnel")
+    st.code(sid)
 
-    name = st.text_input("Nom Tunnel")
+    st.write("Code accès")
+    st.code(secret)
 
-    if st.button("Créer Tunnel"):
+# =====================================================
+# TTU
+# =====================================================
 
-        code = str(uuid.uuid4())[:6]
+TTU["tick"]+=1
 
-        tunnel = {
-            "name": name,
-            "creator": st.session_state.username,
-            "code": code,
-            "members": [st.session_state.username]
-        }
+phi,gamma,phase,K,refresh=ttu_update(
+TTU["rho"],TTU["tick"])
 
-        st.session_state.tunnels.append(tunnel)
+TTU["rho"]*=0.996
 
-        st.success(f"Tunnel créé | Code accès : {code}")
+with st.expander("🔥 État du tunnel"):
 
-    st.markdown("---")
+    st.progress(phi)
+    st.write(phase)
+    st.write(f"Synchronisation {(1-gamma)*100:.1f}%")
 
-    st.markdown("### Rejoindre Tunnel")
+# =====================================================
+# AUTO REFRESH
+# =====================================================
 
-    join_code = st.text_input("Code Tunnel")
-
-    if st.button("Rejoindre"):
-
-        for tunnel in st.session_state.tunnels:
-
-            if tunnel["code"] == join_code:
-
-                if st.session_state.username not in tunnel["members"]:
-                    tunnel["members"].append(st.session_state.username)
-
-                st.success("Tunnel rejoint")
-                st.rerun()
-
-    st.markdown("---")
-
-    st.markdown("### Mes Tunnels")
-
-    if len(st.session_state.tunnels) == 0:
-        st.write("Aucun tunnel")
-
-    for tunnel in st.session_state.tunnels:
-
-        st.write("🔹", tunnel["name"])
-        st.write("Créateur:", tunnel["creator"])
-        st.write("Code:", tunnel["code"])
-
-        if st.session_state.username in tunnel["members"]:
-
-            if st.button(
-                f"Quitter {tunnel['name']}",
-                key=tunnel["code"]
-            ):
-
-                tunnel["members"].remove(
-                    st.session_state.username
-                )
-
-                st.success("Tunnel quitté")
-                st.rerun()
-
-        st.markdown("---")
+st_autorefresh(
+interval=refresh,
+key="tunnel_refresh"
+)
