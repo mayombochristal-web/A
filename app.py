@@ -1,19 +1,17 @@
 import streamlit as st
-from streamlit_autorefresh import st_autorefresh
-import uuid
 import json
 import os
+import uuid
 import time
-import hashlib
-import random
+from streamlit_autorefresh import st_autorefresh
 
-# ======================================
+# =====================================================
 # CONFIG
-# ======================================
+# =====================================================
 
 st.set_page_config(
-    page_title="FREE KONGOSSA",
-    page_icon="🔥",
+    page_title="SovereignNet",
+    page_icon="🌐",
     layout="wide"
 )
 
@@ -22,68 +20,99 @@ DATA="data"
 FILES={
 "users":f"{DATA}/users.json",
 "groups":f"{DATA}/groups.json",
-"posts":f"{DATA}/posts.json",
-"stories":f"{DATA}/stories.json"
+"posts":f"{DATA}/posts.json"
 }
 
 os.makedirs(DATA,exist_ok=True)
 
-def load(path):
-    if not os.path.exists(path):
+# =====================================================
+# DATABASE
+# =====================================================
+
+def load(file):
+
+    if not os.path.exists(file):
         return []
-    with open(path,"r") as f:
-        return json.load(f)
 
-def save(path,data):
-    with open(path,"w") as f:
-        json.dump(data,f)
+    try:
+        with open(file,"r") as f:
+            return json.load(f)
+    except:
+        return []
 
-# ======================================
-# LOGIN
-# ======================================
+def save(file,data):
+
+    with open(file,"w") as f:
+        json.dump(data,f,indent=2)
+
+# =====================================================
+# LIVE REFRESH
+# =====================================================
+
+st_autorefresh(interval=4000,key="refresh")
+
+# =====================================================
+# SESSION
+# =====================================================
 
 if "user" not in st.session_state:
+    st.session_state.user=None
 
-    st.title("🔥 FREE KONGOSSA")
+if "msg_input" not in st.session_state:
+    st.session_state.msg_input=""
 
-    pseudo=st.text_input("Pseudo")
+# =====================================================
+# LOGIN
+# =====================================================
 
-    if st.button("Entrer"):
+if not st.session_state.user:
 
-        if pseudo:
+    st.title("🌐 SovereignNet")
 
-            st.session_state.user=f"{pseudo}_{uuid.uuid4().hex[:4]}"
+    name=st.text_input("Nom utilisateur")
+
+    if st.button("Connexion"):
+
+        if name:
+
+            users=load(FILES["users"])
+
+            if name not in users:
+                users.append(name)
+                save(FILES["users"],users)
+
+            st.session_state.user=name
             st.rerun()
 
     st.stop()
 
-# ======================================
+# =====================================================
 # LOAD DATA
-# ======================================
+# =====================================================
 
-users=load(FILES["users"])
 groups=load(FILES["groups"])
 posts=load(FILES["posts"])
-stories=load(FILES["stories"])
 
-# ======================================
-# UI HEADER
-# ======================================
+# =====================================================
+# HEADER
+# =====================================================
 
-st.title("🔥 FREE KONGOSSA")
+st.title(f"🌐 SovereignNet — {st.session_state.user}")
 
-tab1,tab2,tab3=st.tabs(["💬 Discussions","🔥 Actu","👥 Communautés"])
+tab1,tab2,tab3=st.tabs(["💬 Discussions","🔥 Actu","🌐 Communautés"])
 
-# ======================================
+# =====================================================
 # DISCUSSIONS
-# ======================================
+# =====================================================
 
 with tab1:
+
+    groups=load(FILES["groups"])
 
     my_groups=[g for g in groups if st.session_state.user in g["members"]]
 
     if len(my_groups)==0:
-        st.info("Aucun tunnel rejoint.")
+        st.info("Aucun tunnel rejoint")
         st.stop()
 
     names=[g["name"] for g in my_groups]
@@ -94,28 +123,31 @@ with tab1:
     for g in my_groups:
         if g["name"]==group_name:
             group=g
+            break
 
     if group is None:
         st.stop()
 
-    col1,col2=st.columns([1,3])
+    # ====================
+    # PROFIL TUNNEL
+    # ====================
+
+    col1,col2=st.columns([1,4])
 
     with col1:
-        if group["photo"]:
+        if group.get("photo"):
             st.image(group["photo"],width=80)
 
     with col2:
         st.subheader(group["name"])
-        st.caption(f"{len(group['members'])} membres")
-        st.write(group["description"])
+        st.caption(f"Membres : {len(group['members'])}")
+        st.write(group.get("description",""))
 
     st.divider()
 
     # MESSAGE INPUT
-    if "msg" not in st.session_state:
-        st.session_state.msg=""
 
-    msg=st.text_input("Message",key="msg")
+    msg=st.text_input("Message",key="msg_input")
 
     if st.button("Envoyer"):
 
@@ -129,7 +161,7 @@ with tab1:
 
             save(FILES["groups"],groups)
 
-            st.session_state.msg=""
+            st.session_state.msg_input=""
             st.rerun()
 
     st.divider()
@@ -138,25 +170,25 @@ with tab1:
 
         st.write(f"**{m['user']}** : {m['text']}")
 
-# ======================================
+# =====================================================
 # ACTU
-# ======================================
+# =====================================================
 
 with tab2:
 
-    st.subheader("Nouvelle publication")
+    st.subheader("Publier")
 
     text=st.text_area("Texte")
 
     col1,col2=st.columns(2)
 
     with col1:
-        cam=st.camera_input("Photo")
+        cam=st.camera_input("Photo / vidéo")
 
     with col2:
-        file=st.file_uploader("Upload",type=["png","jpg","jpeg","mp4"])
+        file=st.file_uploader("Choisir fichier",type=["jpg","jpeg","png","mp4"])
 
-    if st.button("Publier"):
+    if st.button("Publier Actu"):
 
         media=None
 
@@ -167,12 +199,11 @@ with tab2:
             media=file.getvalue()
 
         posts.append({
-        "id":uuid.uuid4().hex,
+        "id":str(uuid.uuid4()),
         "user":st.session_state.user,
         "text":text,
         "media":media,
         "time":time.time(),
-        "likes":0,
         "comments":[]
         })
 
@@ -182,134 +213,131 @@ with tab2:
 
     st.divider()
 
-    # ALGO VIRAL
-    def score(p):
-        age=time.time()-p["time"]
-        return (p["likes"]+1)/((age/3600)+1)
+    st.subheader("Fil d'actualité")
 
-    posts_sorted=sorted(posts,key=score,reverse=True)
+    posts=load(FILES["posts"])
 
-    for p in posts_sorted[:50]:
+    posts=sorted(posts,key=lambda x:x["time"],reverse=True)
 
-        st.write(f"**{p['user']}**")
+    for p in posts[:50]:
+
+        st.write(f"### {p['user']}")
 
         if p["text"]:
             st.write(p["text"])
 
-        if p["media"]:
+        if p.get("media"):
             st.image(p["media"])
 
-        if st.button("🔥 Like",key=p["id"]):
-            p["likes"]+=1
-            save(FILES["posts"],posts)
-            st.rerun()
-
-        st.write(f"{p['likes']} likes")
-
-        # COMMENT
-        c=st.text_input("Commenter",key=f"c{p['id']}")
+        comment=st.text_input("Commenter",key=f"c{p['id']}")
 
         if st.button("Envoyer",key=f"s{p['id']}"):
 
-            if c:
+            if comment:
+
                 p["comments"].append({
                 "user":st.session_state.user,
-                "text":c
+                "text":comment
                 })
 
                 save(FILES["posts"],posts)
+
                 st.rerun()
 
-        for com in p["comments"]:
-            st.write(f"💬 {com['user']} : {com['text']}")
+        for c in p["comments"]:
+            st.write(f"💬 {c['user']} : {c['text']}")
 
         st.divider()
 
-# ======================================
+# =====================================================
 # COMMUNAUTES
-# ======================================
+# =====================================================
 
 with tab3:
 
+    groups=load(FILES["groups"])
+
     st.subheader("Créer tunnel")
 
-    my_created=[g for g in groups if g["creator"]==st.session_state.user]
+    owned=[g for g in groups if g["creator"]==st.session_state.user]
 
-    if len(my_created)>=3:
-
-        st.warning("Limite de 3 tunnels créés")
-
-    else:
+    if len(owned)<3:
 
         name=st.text_input("Nom tunnel")
-        desc=st.text_input("Description")
-        photo=st.file_uploader("Photo tunnel",type=["png","jpg","jpeg"])
+        description=st.text_area("Description")
+        public=st.checkbox("Tunnel public")
 
-        if st.button("Créer"):
+        avatar=st.file_uploader("Photo tunnel",type=["png","jpg","jpeg"])
 
-            code=hashlib.sha1(name.encode()).hexdigest()[:6]
+        if st.button("Créer tunnel"):
+
+            code=str(uuid.uuid4())[:8]
 
             groups.append({
+            "id":str(uuid.uuid4()),
             "name":name,
-            "description":desc,
-            "photo":photo.getvalue() if photo else None,
-            "code":code,
             "creator":st.session_state.user,
+            "description":description,
+            "public":public,
+            "code":code,
+            "photo":avatar.getvalue() if avatar else None,
             "members":[st.session_state.user],
             "messages":[]
             })
 
             save(FILES["groups"],groups)
 
-            st.success(f"Code tunnel : {code}")
+            st.success(f"Tunnel créé | code : {code}")
 
             st.rerun()
+
+    else:
+        st.warning("Limite de 3 tunnels créés")
 
     st.divider()
 
     st.subheader("Rejoindre tunnel")
 
-    join=st.text_input("Code tunnel")
+    join_code=st.text_input("Code invitation")
 
     if st.button("Rejoindre"):
 
         for g in groups:
 
-            if g["code"]==join:
+            if g["code"]==join_code:
 
                 if st.session_state.user not in g["members"]:
                     g["members"].append(st.session_state.user)
 
-                    save(FILES["groups"],groups)
-
-                    st.success("Tunnel rejoint")
-                    st.rerun()
+        save(FILES["groups"],groups)
+        st.rerun()
 
     st.divider()
 
-    st.subheader("Mes tunnels")
+    st.subheader("Tunnels publics")
 
     for g in groups:
 
-        if st.session_state.user in g["members"]:
+        if g["public"]:
 
-            col1,col2=st.columns([4,1])
+            st.write(f"### {g['name']}")
+            st.write(g["description"])
+            st.write(f"Membres : {len(g['members'])}")
 
-            with col1:
-                st.write(g["name"])
+            if st.session_state.user in g["members"]:
 
-            with col2:
-
-                if st.button("Quitter",key=g["code"]):
+                if st.button("Ne plus suivre",key=g["id"]):
 
                     g["members"].remove(st.session_state.user)
-
                     save(FILES["groups"],groups)
-
                     st.rerun()
 
-# ======================================
-# AUTO REFRESH
-# ======================================
+            else:
 
-st_autorefresh(interval=4000,key="refresh")
+                if st.button("Suivre",key=g["id"]):
+
+                    g["members"].append(st.session_state.user)
+                    save(FILES["groups"],groups)
+                    st.rerun()
+
+            st.divider()
