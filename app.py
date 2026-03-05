@@ -5,7 +5,6 @@ import hashlib
 import time
 import uuid
 import base64
-import math
 
 # =====================================================
 # CONFIG
@@ -39,16 +38,16 @@ border-left:4px solid #00c853;
 
 .tunnel{
 background:#161b22;
-padding:10px;
+padding:12px;
 border-radius:12px;
-margin-bottom:10px;
+margin-bottom:15px;
 }
 
 </style>
 """,unsafe_allow_html=True)
 
 # =====================================================
-# CRYPTO LIGHT
+# CRYPTO SIMPLE
 # =====================================================
 
 class SOVEREIGN:
@@ -81,7 +80,8 @@ def get_node():
         "messages":{},
         "likes":{},
         "groups":{},
-        "presence":{}
+        "presence":{},
+        "posts":{}
 
     }
 
@@ -119,6 +119,8 @@ sid=SOVEREIGN.tunnel(secret)
 
 NODE["messages"].setdefault(sid,[])
 NODE["likes"].setdefault(sid,{})
+NODE["posts"].setdefault(sid,[])
+
 NODE["groups"].setdefault(sid,{
     "name":"Mon tunnel",
     "desc":"",
@@ -172,19 +174,26 @@ with tab1:
 
     st.markdown("</div>",unsafe_allow_html=True)
 
-    msg=st.text_input("Message",key="msg_input")
+    # message box stable
+    msg=st.text_input("Message",key="message_box")
 
     media=st.file_uploader(
-        "Image / vidéo",
-        type=["jpg","png","jpeg","mp4"]
+        "Envoyer image ou vidéo",
+        type=["png","jpg","jpeg","mp4"],
+        key="media_upload"
     )
 
-    if st.button("Envoyer message"):
+    if st.button("Envoyer"):
 
         if msg or media:
 
-            data=msg.encode() if msg else media.getvalue()
-            typ="text" if msg else media.type
+            if msg:
+                data=msg.encode()
+                typ="text"
+
+            else:
+                data=media.getvalue()
+                typ=media.type
 
             mid=str(uuid.uuid4())
 
@@ -204,7 +213,7 @@ with tab1:
 
     st.divider()
 
-    for m in reversed(NODE["messages"][sid][-50:]):
+    for m in reversed(NODE["messages"][sid][-60:]):
 
         raw=SOVEREIGN.decrypt(m["d"])
 
@@ -239,32 +248,85 @@ with tab1:
 
 with tab2:
 
-    st.subheader("Publier actu")
+    st.subheader("Publier une actu")
 
-    text=st.text_area("Texte")
+    text=st.text_area("Texte actu")
 
     img=st.camera_input("Photo")
 
     video=st.file_uploader(
         "Vidéo",
-        type=["mp4"]
+        type=["mp4"],
+        key="video_post"
     )
 
-    if st.button("Publier"):
+    if st.button("Publier actu"):
 
-        NODE["messages"][sid].append({
+        if text or img or video:
 
-            "id":str(uuid.uuid4()),
-            "u":uid,
-            "d":SOVEREIGN.encrypt(
-                text.encode() if text else img.getvalue()
-            ),
-            "t":"text" if text else "image",
-            "ts":time.time()
+            if text:
+                data=text.encode()
+                typ="text"
 
-        })
+            elif img:
+                data=img.getvalue()
+                typ="image"
 
-        st.rerun()
+            else:
+                data=video.getvalue()
+                typ="video"
+
+            NODE["posts"][sid].append({
+
+                "id":str(uuid.uuid4()),
+                "u":uid,
+                "d":SOVEREIGN.encrypt(data),
+                "t":typ,
+                "comments":[],
+                "ts":time.time()
+
+            })
+
+            st.rerun()
+
+    st.divider()
+
+    for p in reversed(NODE["posts"][sid][-40:]):
+
+        raw=SOVEREIGN.decrypt(p["d"])
+
+        st.markdown(f"### {p['u']}")
+
+        if p["t"]=="text":
+            st.write(raw.decode())
+
+        elif p["t"]=="image":
+            st.image(raw)
+
+        elif p["t"]=="video":
+            st.video(raw)
+
+        comment=st.text_input(
+            "Commenter",
+            key=f"c{p['id']}"
+        )
+
+        if st.button("Envoyer",key=f"s{p['id']}"):
+
+            if comment:
+
+                p["comments"].append({
+                    "u":uid,
+                    "text":comment
+                })
+
+                st.rerun()
+
+        for c in p["comments"]:
+
+            st.write(f"💬 {c['u']} : {c['text']}")
+
+        st.divider()
 
 # =====================================================
 # COMMUNAUTES
@@ -272,7 +334,7 @@ with tab2:
 
 with tab3:
 
-    st.subheader("Gestion des tunnels")
+    st.subheader("Gestion tunnel")
 
     g=NODE["groups"][sid]
 
@@ -286,10 +348,11 @@ with tab3:
 
     avatar=st.file_uploader(
         "Photo tunnel",
-        type=["png","jpg","jpeg"]
+        type=["png","jpg","jpeg"],
+        key="avatar"
     )
 
-    if st.button("Mettre à jour tunnel"):
+    if st.button("Mettre à jour"):
 
         g["name"]=name
         g["desc"]=desc
