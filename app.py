@@ -160,10 +160,18 @@ def feed():
         img = st.file_uploader("Image", type=["png", "jpg", "jpeg"], key="feed_img")
     with col_vid:
         video = st.file_uploader("Vidéo", type=["mp4", "mov", "avi", "mkv"], key="feed_video")
-   if img and img.size > 50 * 1024 * 1024:
-    st.error("Cette image est trop lourde (max 50 Mo)") # Erreur d'alignement ici
-if video and video.size > 50 * 1024 * 1024: # Erreur d'alignement ici
-    st.error("Cette vidéo dépasse la limite de 50 Mo de Supabase")
+
+    # -------------------------------------------------
+    # VERIFICATION TAILLE FICHIERS (MAX 50MB SUPABASE)
+    # -------------------------------------------------
+    if img is not None and img.size > 50 * 1024 * 1024:
+        st.error("Cette image est trop lourde (max 50 Mo)")
+        st.stop()
+
+    if video is not None and video.size > 50 * 1024 * 1024:
+        st.error("Cette vidéo dépasse la limite de 50 Mo de Supabase")
+        st.stop()
+    # -------------------------------------------------
 
     if st.button("Publier"):
         media_url = ""
@@ -301,6 +309,15 @@ def messenger():
         )
 
     if st.button("Envoyer message", type="primary"):
+        # Vérification de la taille des fichiers (max 50 Mo)
+        if audio_file is not None and audio_file.size > 50 * 1024 * 1024:
+            st.error("Fichier audio trop lourd (max 50 Mo)")
+            st.stop()
+
+        if video_file is not None and video_file.size > 50 * 1024 * 1024:
+            st.error("Fichier vidéo trop lourd (max 50 Mo)")
+            st.stop()
+
         # Extraction des bytes de l'enregistrement
         audio_bytes = None
         if recorder_output is not None:
