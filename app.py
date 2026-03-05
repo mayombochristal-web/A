@@ -377,7 +377,7 @@ def about():
         st.info("Ajoutez une photo dans assets/creator.jpg")
 
     st.markdown("""
-    ### **Jean Kogossa**  
+    ### **SCARABBE**  
     *Fondateur de Free_Kogossa*
 
     Passionné par les technologies de communication et les communautés en ligne, j'ai créé Free_Kogossa pour offrir un espace d'échange libre, respectueux et innovant. Mon objectif est de permettre à chacun de s'exprimer sans contraintes, tout en restant connecté à ses proches.
