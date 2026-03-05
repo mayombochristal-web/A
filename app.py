@@ -1,5 +1,4 @@
 import streamlit as st
-from cryptography.fernet import Fernet
 from streamlit_autorefresh import st_autorefresh
 
 import hashlib
@@ -13,7 +12,7 @@ import math
 # =====================================================
 
 st.set_page_config(
-    page_title="GEN-Z GABON FREE-KONGOSSA",
+    page_title="Free_Kogossa",
     page_icon="🇬🇦",
     layout="centered"
 )
@@ -43,13 +42,6 @@ background:#161b22;
 padding:30px;
 border-radius:15px;
 text-align:center;
-}
-
-.tunnelcard{
-background:#1c1c1c;
-padding:10px;
-border-radius:10px;
-margin-bottom:10px;
 }
 
 </style>
@@ -84,7 +76,7 @@ def ttu_update(rho,tick):
     return phi,gamma,phase,K,refresh
 
 # =====================================================
-# CRYPTO ENGINE
+# CRYPTO LIGHT
 # =====================================================
 
 class SOVEREIGN:
@@ -94,37 +86,13 @@ class SOVEREIGN:
         return hashlib.sha256(secret.encode()).hexdigest()[:20]
 
     @staticmethod
-    def key(secret):
-
-        k=hashlib.pbkdf2_hmac(
-            "sha256",
-            secret.encode(),
-            b"SOVEREIGN-GABON",
-            150000
-        )
-
-        return base64.urlsafe_b64encode(k[:32])
+    def encrypt(data):
+        return base64.b64encode(data).decode()
 
     @staticmethod
-    def encrypt(secret,data):
-
-        f=Fernet(SOVEREIGN.key(secret))
-
-        return base64.b64encode(
-            f.encrypt(data)
-        ).decode()
-
-    @staticmethod
-    def decrypt(secret,data):
-
+    def decrypt(data):
         try:
-
-            f=Fernet(SOVEREIGN.key(secret))
-
-            return f.decrypt(
-                base64.b64decode(data)
-            )
-
+            return base64.b64decode(data)
         except:
             return None
 
@@ -140,10 +108,8 @@ def get_node():
         "messages":{},
         "presence":{},
         "likes":{},
-        "live":{},
         "ttu":{},
-        "posts":{},
-        "tunnels":{}
+        "posts":{}
 
     }
 
@@ -162,7 +128,7 @@ if "uid" not in st.session_state:
     pseudo=st.text_input("Pseudo")
     secret=st.text_input("Code Tunnel",type="password")
 
-    if st.button("ENTRER"):
+    if st.button("Entrer"):
 
         if pseudo and secret:
 
@@ -172,6 +138,7 @@ if "uid" not in st.session_state:
             st.rerun()
 
     st.markdown("</div>",unsafe_allow_html=True)
+
     st.stop()
 
 # =====================================================
@@ -183,7 +150,6 @@ sid=SOVEREIGN.tunnel(secret)
 
 NODE["messages"].setdefault(sid,[])
 NODE["likes"].setdefault(sid,{})
-NODE["live"].setdefault(sid,None)
 NODE["ttu"].setdefault(sid,{"rho":0.2,"tick":0})
 NODE["posts"].setdefault(sid,[])
 
@@ -215,7 +181,7 @@ def push(data,typ):
 
         "id":mid,
         "u":st.session_state.uid,
-        "d":SOVEREIGN.encrypt(secret,data),
+        "d":SOVEREIGN.encrypt(data),
         "t":typ,
         "ts":time.time()
 
@@ -259,100 +225,34 @@ with tab_chat:
 
     st.subheader("Tunnel")
 
-    with st.expander("➕ Publier",expanded=True):
+    txt=st.text_area("Message",key="msgbox")
 
-        tab1,tab2,tab3,tab4=st.tabs(
-        ["💬 Texte","📸 Média","🎙️ Vocal","🔴 Live"]
-        )
+    if st.button("Envoyer"):
 
-        with tab1:
+        if txt:
 
-            txt=st.text_area("Message",key="msgbox")
-
-            if st.button("Envoyer texte"):
-
-                if txt:
-
-                    push(txt.encode(),"text")
-                    st.session_state.msgbox=""
-                    st.rerun()
-
-        with tab2:
-
-            img=st.camera_input("Photo")
-
-            file=st.file_uploader(
-            "Envoyer média",
-            type=["png","jpg","jpeg","mp4"]
-            )
-
-            if img and st.button("Publier photo"):
-
-                push(img.getvalue(),"image")
-                st.rerun()
-
-            if file and st.button("Publier fichier"):
-
-                push(file.getvalue(),file.type)
-                st.rerun()
-
-        with tab3:
-
-            audio=st.audio_input("Vocal")
-
-            if audio and st.button("Envoyer vocal"):
-
-                push(audio.getvalue(),"audio")
-                st.rerun()
-
-        with tab4:
-
-            if NODE["live"][sid] is None:
-
-                if st.button("🔴 Start Live"):
-
-                    NODE["live"][sid]=st.session_state.uid
-                    TTU["rho"]+=0.1
-                    st.rerun()
-
-            else:
-
-                st.success(
-                f"🔴 LIVE par {NODE['live'][sid]}"
-                )
-
-                if NODE["live"][sid]==st.session_state.uid:
-
-                    if st.button("Stop Live"):
-
-                        NODE["live"][sid]=None
-                        st.rerun()
+            push(txt.encode(),"text")
+            st.session_state.msgbox=""
+            st.rerun()
 
     st.divider()
 
     for m in reversed(NODE["messages"][sid][-60:]):
 
-        raw=SOVEREIGN.decrypt(secret,m["d"])
+        raw=SOVEREIGN.decrypt(m["d"])
 
         if raw:
 
             st.markdown(f"**{m['u']}**")
 
             if m["t"]=="text":
+
                 st.markdown(
                 f"<div class='msg'>{raw.decode()}</div>",
                 unsafe_allow_html=True)
 
-            elif m["t"]=="image":
-                st.image(raw)
-
-            elif "video" in m["t"]:
-                st.video(raw)
-
-            elif m["t"]=="audio":
-                st.audio(raw)
-
             if st.button("❤️",key=m["id"]):
+
                 like(m["id"])
                 st.rerun()
 
@@ -389,17 +289,17 @@ with tab_actu:
         st.caption(time.ctime(p["ts"]))
 
 # =====================================================
-# COMMUNAUTÉS
+# COMMUNAUTÉ
 # =====================================================
 
 with tab_com:
 
-    st.subheader("🌐 Tunnel info")
+    st.subheader("Tunnel Info")
 
     st.write("ID Tunnel")
     st.code(sid)
 
-    st.write("Code accès")
+    st.write("Code d'accès")
     st.code(secret)
 
 # =====================================================
