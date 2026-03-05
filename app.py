@@ -1,6 +1,12 @@
 import streamlit as st
 from cryptography.fernet import Fernet
-import hashlib, time, uuid, base64, math
+from streamlit_autorefresh import st_autorefresh
+
+import hashlib
+import time
+import uuid
+import base64
+import math
 
 # =====================================================
 # CONFIG
@@ -18,27 +24,37 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-.stApp{background:#0e1117;color:white;}
 
-.msg-box{
-padding:14px;
-border-radius:14px;
-background:#1e1e1e;
-margin-bottom:10px;
-border-left:5px solid #2e7d32;
+.stApp{
+background:#0e1117;
+color:white;
 }
 
-.login-box{
-padding:25px;
-border-radius:15px;
+.msg{
+padding:12px;
+border-radius:12px;
+background:#1c1c1c;
+margin-bottom:10px;
+border-left:4px solid #00c853;
+}
+
+.login{
 background:#161b22;
+padding:30px;
+border-radius:15px;
 text-align:center;
 }
+
+.like{
+color:#ff4081;
+font-size:18px;
+}
+
 </style>
 """,unsafe_allow_html=True)
 
 # =====================================================
-# TTU ENGINE (ANTI CRASH)
+# TTU ENGINE
 # =====================================================
 
 def ttu_update(rho,tick):
@@ -52,21 +68,21 @@ def ttu_update(rho,tick):
 
     if phi<0.3:
         phase="😴 Tunnel calme"
-        refresh=7
+        refresh=7000
     elif phi<0.6:
         phase="🟢 Discussions actives"
-        refresh=4
+        refresh=4000
     elif phi<0.85:
         phase="⚡ Tunnel chaud"
-        refresh=2
+        refresh=2000
     else:
         phase="🔥 VIRAL"
-        refresh=1
+        refresh=1000
 
     return phi,gamma,phase,K,refresh
 
 # =====================================================
-# CRYPTO
+# CRYPTO ENGINE
 # =====================================================
 
 class SOVEREIGN:
@@ -77,161 +93,227 @@ class SOVEREIGN:
 
     @staticmethod
     def key(secret):
+
         k=hashlib.pbkdf2_hmac(
-            "sha256",secret.encode(),
-            b"GABON-SOVEREIGN",150000)
+            "sha256",
+            secret.encode(),
+            b"SOVEREIGN-GABON",
+            150000
+        )
+
         return base64.urlsafe_b64encode(k[:32])
 
     @staticmethod
     def encrypt(secret,data):
+
         f=Fernet(SOVEREIGN.key(secret))
-        return base64.b64encode(f.encrypt(data)).decode()
+
+        return base64.b64encode(
+            f.encrypt(data)
+        ).decode()
 
     @staticmethod
     def decrypt(secret,data):
+
         try:
+
             f=Fernet(SOVEREIGN.key(secret))
-            return f.decrypt(base64.b64decode(data))
+
+            return f.decrypt(
+                base64.b64decode(data)
+            )
+
         except:
+
             return None
 
 # =====================================================
-# NODE GLOBAL
+# GLOBAL NODE
 # =====================================================
 
 @st.cache_resource
 def get_node():
-    return {"TUNNELS":{}, "PRESENCE":{}, "TTU":{}, "LIVE":{}}
+
+    return {
+
+        "messages":{},
+        "presence":{},
+        "likes":{},
+        "live":{},
+        "ttu":{}
+
+    }
 
 NODE=get_node()
 
 # =====================================================
-# LOGIN PREMIÈRE PAGE
+# LOGIN
 # =====================================================
 
 if "uid" not in st.session_state:
 
-    st.markdown("<div class='login-box'>",unsafe_allow_html=True)
+    st.markdown("<div class='login'>",unsafe_allow_html=True)
 
     st.title("🇬🇦 GEN-Z GABON")
-    st.subheader("FREE-KONGOSSA")
 
     pseudo=st.text_input("Pseudo")
-    secret=st.text_input("Code Tunnel Secret",type="password")
+    secret=st.text_input("Code Tunnel",type="password")
 
-    if st.button("ENTRER",use_container_width=True):
+    if st.button("ENTRER"):
+
         if pseudo and secret:
-            st.session_state.uid=f"🇬🇦 {pseudo}#{uuid.uuid4().hex[:3]}"
+
+            st.session_state.uid=f"{pseudo}#{uuid.uuid4().hex[:3]}"
             st.session_state.secret=secret
+
             st.rerun()
 
     st.markdown("</div>",unsafe_allow_html=True)
+
     st.stop()
 
 # =====================================================
-# INIT SESSION
+# INIT
 # =====================================================
 
 secret=st.session_state.secret
 sid=SOVEREIGN.tunnel(secret)
 
-NODE["TUNNELS"].setdefault(sid,[])
-NODE["TTU"].setdefault(sid,{"rho":0.2,"tick":0})
-NODE["LIVE"].setdefault(sid,None)
+NODE["messages"].setdefault(sid,[])
+NODE["likes"].setdefault(sid,{})
+NODE["live"].setdefault(sid,None)
+NODE["ttu"].setdefault(sid,{"rho":0.2,"tick":0})
 
-TTU=NODE["TTU"][sid]
+TTU=NODE["ttu"][sid]
 
 # =====================================================
 # PRESENCE
 # =====================================================
 
 now=time.time()
-NODE["PRESENCE"][st.session_state.uid]={"ts":now,"sid":sid}
 
-active_now=[u for u,d in NODE["PRESENCE"].items()
-            if now-d["ts"]<30 and d["sid"]==sid]
+NODE["presence"][st.session_state.uid]={
+"ts":now,
+"sid":sid
+}
+
+active=[u for u,d in NODE["presence"].items()
+        if now-d["ts"]<30 and d["sid"]==sid]
 
 # =====================================================
-# PUSH MESSAGE
+# MESSAGE PUSH
 # =====================================================
 
 def push(data,typ):
 
-    NODE["TUNNELS"][sid].append({
+    mid=str(uuid.uuid4())
+
+    NODE["messages"][sid].append({
+
+        "id":mid,
         "u":st.session_state.uid,
         "d":SOVEREIGN.encrypt(secret,data),
         "t":typ,
         "ts":time.time()
+
     })
 
-    NODE["TUNNELS"][sid]=NODE["TUNNELS"][sid][-150:]
-    TTU["rho"]=min(1.2,TTU["rho"]+0.02)
+    NODE["likes"][sid][mid]=0
+
+    NODE["messages"][sid]=NODE["messages"][sid][-200:]
+
+    TTU["rho"]=min(1.3,TTU["rho"]+0.02)
+
+# =====================================================
+# LIKE
+# =====================================================
+
+def like(mid):
+
+    NODE["likes"][sid][mid]+=1
 
 # =====================================================
 # UI
 # =====================================================
 
 st.title("🏠 Flux Souverain")
-st.write(f"🟢 {len(active_now)} membres en ligne")
+
+st.write(f"🟢 {len(active)} membres en ligne")
 
 # =====================================================
-# ONGLET PUBLIER COMPLET
+# POST
 # =====================================================
 
-with st.expander("➕ PUBLIER",expanded=True):
+with st.expander("➕ Publier",expanded=True):
 
     tab1,tab2,tab3,tab4=st.tabs(
-        ["💬 Texte","📸 Photo/Vidéo","🎙️ Audio","🔴 Live"]
+        ["💬 Texte","📸 Média","🎙️ Vocal","🔴 Live"]
     )
 
-    # -------- TEXTE --------
+    # TEXT
     with tab1:
-        txt=st.text_area("Message",label_visibility="collapsed")
-        if st.button("Envoyer texte",use_container_width=True):
+
+        txt=st.text_area("Message")
+
+        if st.button("Envoyer texte"):
+
             if txt:
+
                 push(txt.encode(),"text")
                 st.rerun()
 
-    # -------- PHOTO / VIDEO --------
+    # MEDIA
     with tab2:
 
-        img=st.camera_input("Prendre une photo")
+        img=st.camera_input("Photo")
 
         file=st.file_uploader(
-            "Ou envoyer un média",
+            "Envoyer média",
             type=["png","jpg","jpeg","mp4"]
         )
 
         if img and st.button("Publier photo"):
+
             push(img.getvalue(),"image")
             st.rerun()
 
         if file and st.button("Publier fichier"):
+
             push(file.getvalue(),file.type)
             st.rerun()
 
-    # -------- AUDIO --------
+    # AUDIO
     with tab3:
-        audio=st.audio_input("Enregistrer un vocal")
+
+        audio=st.audio_input("Vocal")
 
         if audio and st.button("Envoyer vocal"):
+
             push(audio.getvalue(),"audio")
             st.rerun()
 
-    # -------- LIVE (SIMULATION STABLE) --------
+    # LIVE
     with tab4:
 
-        if NODE["LIVE"][sid] is None:
-            if st.button("🔴 Démarrer LIVE"):
-                NODE["LIVE"][sid]=st.session_state.uid
+        if NODE["live"][sid] is None:
+
+            if st.button("🔴 Start Live"):
+
+                NODE["live"][sid]=st.session_state.uid
                 TTU["rho"]+=0.1
                 st.rerun()
-        else:
-            st.success(f"🔴 LIVE par {NODE['LIVE'][sid]}")
 
-            if NODE["LIVE"][sid]==st.session_state.uid:
-                if st.button("⛔ Stop LIVE"):
-                    NODE["LIVE"][sid]=None
+        else:
+
+            st.success(
+                f"🔴 LIVE par {NODE['live'][sid]}"
+            )
+
+            if NODE["live"][sid]==st.session_state.uid:
+
+                if st.button("Stop Live"):
+
+                    NODE["live"][sid]=None
                     st.rerun()
 
 st.divider()
@@ -243,22 +325,21 @@ st.divider()
 TTU["tick"]+=1
 
 phi,gamma,phase,K,refresh=ttu_update(
-    TTU["rho"],TTU["tick"]
-)
+TTU["rho"],TTU["tick"])
 
 TTU["rho"]*=0.996
 
-with st.expander("🔥 État du Tunnel"):
+with st.expander("🔥 État du tunnel"):
 
     st.progress(phi)
-    st.metric("Phase",phase)
-    st.metric("Synchronisation",f"{(1-gamma)*100:.1f}%")
+    st.write(phase)
+    st.write(f"Synchronisation {(1-gamma)*100:.1f}%")
 
 # =====================================================
-# FLUX
+# FEED
 # =====================================================
 
-for m in reversed(NODE["TUNNELS"][sid][-40:]):
+for m in reversed(NODE["messages"][sid][-60:]):
 
     raw=SOVEREIGN.decrypt(secret,m["d"])
 
@@ -267,27 +348,44 @@ for m in reversed(NODE["TUNNELS"][sid][-40:]):
         st.markdown(f"**{m['u']}**")
 
         if m["t"]=="text":
+
             st.markdown(
-                f"<div class='msg-box'>{raw.decode()}</div>",
-                unsafe_allow_html=True)
+            f"<div class='msg'>{raw.decode()}</div>",
+            unsafe_allow_html=True)
 
         elif m["t"]=="image":
+
             st.image(raw)
 
         elif "video" in m["t"]:
+
             st.video(raw)
 
         elif m["t"]=="audio":
+
             st.audio(raw)
 
+        col1,col2=st.columns([1,6])
+
+        with col1:
+
+            if st.button("❤️",
+                key=m["id"]):
+
+                like(m["id"])
+                st.rerun()
+
+        with col2:
+
+            st.write(
+            f"{NODE['likes'][sid][m['id']]} likes"
+            )
+
 # =====================================================
-# HORLOGE TTU ADAPTATIVE
+# AUTO REFRESH
 # =====================================================
 
-if "last_refresh" not in st.session_state:
-    st.session_state.last_refresh=0
-
-if time.time()-st.session_state.last_refresh>refresh:
-    st.session_state.last_refresh=time.time()
-    time.sleep(0.2)
-    st.rerun()
+st_autorefresh(
+interval=refresh,
+key="tunnel_refresh"
+)
