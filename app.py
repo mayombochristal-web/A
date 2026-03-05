@@ -11,21 +11,46 @@ from streamlit_mic_recorder import mic_recorder
 # =====================================================
 st.set_page_config(page_title="Free_Kogossa", layout="wide")
 
-# Récupération des secrets (à configurer dans Streamlit Cloud / secrets.toml local)
 url = st.secrets["supabase"]["url"]
 key = st.secrets["supabase"]["key"]
 supabase: Client = create_client(url, key)
 
-DATA_FOLDER = "data"
-ASSETS_FOLDER = "assets"
+DATA_FOLDER = "data"          # Pour fichiers temporaires (optionnel)
+ASSETS_FOLDER = "assets"      # Pour la photo du créateur
 os.makedirs(DATA_FOLDER, exist_ok=True)
 os.makedirs(ASSETS_FOLDER, exist_ok=True)
+
+BUCKET_NAME = "uploads"       # Nom du bucket Supabase
 
 # =====================================================
 # SÉCURITÉ : HACHAGE DES MOTS DE PASSE
 # =====================================================
 def hash_password(password):
     return hashlib.sha256(str.encode(password)).hexdigest()
+
+# =====================================================
+# UPLOAD VERS SUPABASE STORAGE
+# =====================================================
+def upload_to_storage(file_data, filename, content_type=None):
+    """
+    Upload un fichier vers le bucket 'uploads' et retourne l'URL publique.
+    file_data: bytes ou BytesIO
+    filename: nom du fichier (unique de préférence)
+    content_type: type MIME (optionnel)
+    """
+    try:
+        # Upload du fichier
+        supabase.storage.from_(BUCKET_NAME).upload(
+            path=filename,
+            file=file_data,
+            file_options={"content-type": content_type} if content_type else {}
+        )
+        # Récupération de l'URL publique
+        public_url = supabase.storage.from_(BUCKET_NAME).get_public_url(filename)
+        return public_url
+    except Exception as e:
+        st.error(f"Erreur d'upload : {e}")
+        return None
 
 # =====================================================
 # SESSION
@@ -65,19 +90,19 @@ def login():
         pic = st.file_uploader("Photo profil", type=["png", "jpg", "jpeg"])
 
         if st.button("Créer compte"):
-            # Vérifier si l'utilisateur existe déjà
+            # Vérifier si l'utilisateur existe
             check = supabase.table("profiles").select("username").eq("username", new_user).execute()
             if check.data:
                 st.error("Ce pseudo est déjà pris")
             elif len(new_pass) < 4:
                 st.error("Mot de passe trop court (minimum 4 caractères)")
             else:
-                # Sauvegarde de l'image localement (optionnel)
-                pic_path = ""
+                profile_pic_url = ""
                 if pic:
-                    pic_path = f"{DATA_FOLDER}/{new_user}_profile.png"
-                    with open(pic_path, "wb") as f:
-                        f.write(pic.getbuffer())
+                    # Générer un nom de fichier unique
+                    ext = pic.name.split('.')[-1]
+                    filename = f"profile_{new_user}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{ext}"
+                    profile_pic_url = upload_to_storage(pic.getvalue(), filename, pic.type)
 
                 # Insertion dans Supabase
                 user_dict = {
@@ -85,7 +110,7 @@ def login():
                     "password": hash_password(new_pass),
                     "bio": bio,
                     "location": location,
-                    "profile_pic": pic_path,
+                    "profile_pic": profile_pic_url,
                 }
                 supabase.table("profiles").insert(user_dict).execute()
                 st.success("Compte créé sur le Cloud ! Vous pouvez maintenant vous connecter.")
@@ -95,7 +120,6 @@ def login():
 # =====================================================
 def banner():
     user = st.session_state.user
-    # Récupérer les infos du profil depuis Supabase
     response = supabase.table("profiles").select("*").eq("username", user).execute()
     if response.data:
         profile = response.data[0]
@@ -107,9 +131,11 @@ def banner():
     col1, col2 = st.columns([1, 4])
 
     with col1:
-        pic = profile.get("profile_pic", "")
-        if pic and os.path.exists(pic):
-            st.image(pic, width=120)
+        pic_url = profile.get("profile_pic", "")
+        if pic_url:
+            st.image(pic_url, width=120)
+        else:
+            st.caption("(aucune photo)")
 
     with col2:
         st.title(user)
@@ -121,7 +147,7 @@ def banner():
     st.divider()
 
 # =====================================================
-# FIL SOCIAL (AVEC SUPABASE)
+# FIL SOCIAL (AVEC SUPABASE STORAGE)
 # =====================================================
 def feed():
     st_autorefresh(interval=5000, key="feed_refresh")
@@ -136,29 +162,25 @@ def feed():
         video = st.file_uploader("Vidéo", type=["mp4", "mov", "avi", "mkv"], key="feed_video")
 
     if st.button("Publier"):
-        media_path = ""
+        media_url = ""
         media_type = None
 
         if img is not None:
-            # Générer un nom unique (on utilise un timestamp)
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            media_path = f"{DATA_FOLDER}/post_img_{st.session_state.user}_{timestamp}.png"
-            with open(media_path, "wb") as f:
-                f.write(img.getbuffer())
+            ext = img.name.split('.')[-1]
+            filename = f"post_img_{st.session_state.user}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{ext}"
+            media_url = upload_to_storage(img.getvalue(), filename, img.type)
             media_type = "image"
         elif video is not None:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            ext = os.path.splitext(video.name)[1]
-            media_path = f"{DATA_FOLDER}/post_vid_{st.session_state.user}_{timestamp}{ext}"
-            with open(media_path, "wb") as f:
-                f.write(video.getbuffer())
+            ext = video.name.split('.')[-1]
+            filename = f"post_vid_{st.session_state.user}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{ext}"
+            media_url = upload_to_storage(video.getvalue(), filename, video.type)
             media_type = "video"
 
         # Insertion du post dans Supabase
         post_dict = {
             "username": st.session_state.user,
             "text": text,
-            "media_path": media_path,
+            "media_path": media_url,      # On garde le même nom de colonne
             "media_type": media_type,
         }
         supabase.table("posts").insert(post_dict).execute()
@@ -166,8 +188,7 @@ def feed():
 
     st.divider()
 
-    # Récupération des 20 derniers posts avec leurs commentaires
-    # On joint les commentaires ? Pour simplifier, on récupère les posts puis on charge les commentaires séparément.
+    # Récupération des 20 derniers posts
     posts_response = supabase.table("posts").select("*").order("created_at", desc=True).limit(20).execute()
     posts_list = posts_response.data if posts_response.data else []
 
@@ -176,23 +197,22 @@ def feed():
             st.subheader(f"@{post['username']}")
             st.write(post.get("text", ""))
 
-            media_path = post.get("media_path", "")
+            media_url = post.get("media_path", "")
             media_type = post.get("media_type")
-            if media_path and os.path.exists(media_path):
+            if media_url:
                 if media_type == "image":
-                    st.image(media_path)
+                    st.image(media_url)
                 elif media_type == "video":
-                    st.video(media_path)
+                    st.video(media_url)
 
             # Formatage de la date
             created_at = datetime.fromisoformat(post["created_at"].replace("Z", "+00:00"))
             st.caption(created_at.strftime("%Y-%m-%d %H:%M"))
 
-            # Récupération des commentaires pour ce post
+            # Récupération des commentaires
             comments_response = supabase.table("comments").select("*").eq("post_id", post["id"]).order("created_at").execute()
             comments = comments_response.data if comments_response.data else []
 
-            # Zone de commentaire
             comment_key = f"c_{post['id']}"
             comment_text = st.text_input("Commenter", key=comment_key)
             if st.button("Envoyer", key=f"b_{post['id']}"):
@@ -205,19 +225,18 @@ def feed():
                     supabase.table("comments").insert(comment_dict).execute()
                     st.rerun()
 
-            # Affichage des commentaires existants
             for c in comments:
                 st.write(f"**{c['username']}** : {c['text']}")
             st.divider()
 
 # =====================================================
-# MESSAGERIE (AVEC SUPABASE)
+# MESSAGERIE (AVEC SUPABASE STORAGE)
 # =====================================================
 def messenger():
     st_autorefresh(interval=2000, key="msg_refresh")
     st.header("Messagerie")
 
-    # Récupération de la liste des autres utilisateurs
+    # Liste des autres utilisateurs
     users_response = supabase.table("profiles").select("username").neq("username", st.session_state.user).execute()
     users_list = [u["username"] for u in users_response.data] if users_response.data else []
 
@@ -227,28 +246,20 @@ def messenger():
 
     target = st.selectbox("Choisir utilisateur", users_list, key="msg_target")
 
-    # Récupération des messages entre l'utilisateur courant et le target
-    # On utilise un filtre OR : (sender=user & recipient=target) OR (sender=target & recipient=user)
+    # Récupération des messages entre les deux utilisateurs
     from_user = st.session_state.user
+    # Requête avec OR pour les deux sens
     messages_response = supabase.table("messages").select("*")\
         .or_(f"sender.eq.{from_user},recipient.eq.{from_user}")\
         .or_(f"sender.eq.{target},recipient.eq.{target}")\
         .order("created_at").execute()
-    # Note: cette double condition n'est pas idéale, on peut utiliser une condition plus complexe.
-    # Mieux : on récupère tous les messages où (sender=from_user et recipient=target) ou (sender=target et recipient=from_user)
-    # Avec Supabase, on peut faire :
-    # .or_("and(sender.eq.from_user,recipient.eq.target),and(sender.eq.target,recipient.eq.from_user)")
-    # Mais pour simplifier, on va filtrer en python après récupération.
-    # On récupère un peu plus large puis on filtre.
-    # Alternative: on utilise une fonction RPC, mais on reste simple ici.
     all_msgs = messages_response.data if messages_response.data else []
-    # Filtrer pour ne garder que les échanges entre les deux
+    # Filtrer pour n'avoir que les échanges entre les deux
     filtered_msgs = [
         m for m in all_msgs
         if (m["sender"] == from_user and m["recipient"] == target) or
            (m["sender"] == target and m["recipient"] == from_user)
     ]
-    # Trier par date (déjà fait par la requête, mais on refiltre, donc on trie)
     filtered_msgs.sort(key=lambda x: x["created_at"])
 
     for m in filtered_msgs:
@@ -257,10 +268,10 @@ def messenger():
         else:
             prefix = f"🔵 **{m['sender']}** : "
 
-        if m.get("audio_path") and os.path.exists(m["audio_path"]):
+        if m.get("audio_path"):  # contient une URL
             st.write(prefix + "[Message audio]")
             st.audio(m["audio_path"])
-        elif m.get("video_path") and os.path.exists(m["video_path"]):
+        elif m.get("video_path"):
             st.write(prefix + "[Message vidéo]")
             st.video(m["video_path"])
         else:
@@ -300,50 +311,46 @@ def messenger():
         }
 
         if audio_bytes is not None:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            audio_path = f"{DATA_FOLDER}/voice_{st.session_state.user}_{timestamp}.wav"
-            with open(audio_path, "wb") as f:
-                f.write(audio_bytes)
-            message_dict["audio_path"] = audio_path
+            filename = f"voice_{st.session_state.user}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.wav"
+            url = upload_to_storage(audio_bytes, filename, "audio/wav")
+            message_dict["audio_path"] = url
         elif audio_file is not None:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            audio_path = f"{DATA_FOLDER}/audio_{st.session_state.user}_{timestamp}.audio"
-            with open(audio_path, "wb") as f:
-                f.write(audio_file.getbuffer())
-            message_dict["audio_path"] = audio_path
+            ext = audio_file.name.split('.')[-1]
+            filename = f"audio_{st.session_state.user}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{ext}"
+            url = upload_to_storage(audio_file.getvalue(), filename, audio_file.type)
+            message_dict["audio_path"] = url
         elif video_file is not None:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            video_path = f"{DATA_FOLDER}/video_{st.session_state.user}_{timestamp}.video"
-            with open(video_path, "wb") as f:
-                f.write(video_file.getbuffer())
-            message_dict["video_path"] = video_path
+            ext = video_file.name.split('.')[-1]
+            filename = f"video_{st.session_state.user}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{ext}"
+            url = upload_to_storage(video_file.getvalue(), filename, video_file.type)
+            message_dict["video_path"] = url
         elif text_msg.strip() != "":
             message_dict["text"] = text_msg
         else:
             st.warning("Écris un message, enregistre un audio ou ajoute un fichier.")
             st.stop()
 
-        # Insertion du message dans Supabase
         supabase.table("messages").insert(message_dict).execute()
         st.rerun()
 
 # =====================================================
-# PROFIL (AVEC SUPABASE)
+# PROFIL (AVEC SUPABASE STORAGE)
 # =====================================================
 def profile():
     user = st.session_state.user
     st.header("Profil")
 
-    # Récupérer les infos actuelles
     response = supabase.table("profiles").select("*").eq("username", user).execute()
     if not response.data:
         st.error("Profil introuvable")
         return
     profile_data = response.data[0]
 
-    pic = profile_data.get("profile_pic", "")
-    if pic and os.path.exists(pic):
-        st.image(pic, width=150)
+    pic_url = profile_data.get("profile_pic", "")
+    if pic_url:
+        st.image(pic_url, width=150)
+    else:
+        st.caption("(aucune photo)")
 
     st.write("Bio :", profile_data.get("bio", ""))
     st.write("Localisation :", profile_data.get("location", ""))
@@ -361,10 +368,12 @@ def profile():
         if new_loc != profile_data.get("location"):
             update_dict["location"] = new_loc
         if new_pic:
-            path = f"{DATA_FOLDER}/{user}_profile.png"
-            with open(path, "wb") as f:
-                f.write(new_pic.getbuffer())
-            update_dict["profile_pic"] = path
+            # Upload de la nouvelle photo
+            ext = new_pic.name.split('.')[-1]
+            filename = f"profile_{user}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{ext}"
+            pic_url = upload_to_storage(new_pic.getvalue(), filename, new_pic.type)
+            if pic_url:
+                update_dict["profile_pic"] = pic_url
 
         if update_dict:
             supabase.table("profiles").update(update_dict).eq("username", user).execute()
@@ -420,7 +429,7 @@ def about():
         """)
     with col2:
         st.markdown("""
-        - 🗂️ **Stockage local** : Vos données restent sur votre serveur.
+        - 🗂️ **Stockage cloud** : Vos médias sont hébergés en toute sécurité.
         - 👥 **Communauté libre** : Créez votre réseau sans restrictions.
         - 🔄 **Mises à jour continues** : Le projet évolue avec vos retours.
         - 💬 **Commentaires intégrés** : Interagissez sur les publications.
