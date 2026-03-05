@@ -1,384 +1,265 @@
 import streamlit as st
-from streamlit_autorefresh import st_autorefresh
-
-import hashlib
-import time
-import uuid
-import base64
+import json
+import os
+from datetime import datetime
 
 # =====================================================
 # CONFIG
 # =====================================================
 
-st.set_page_config(
-    page_title="Free_Kogossa",
-    page_icon="🇬🇦",
-    layout="centered"
-)
+st.set_page_config(page_title="Free_Kogossa", layout="wide")
+
+DATA_FOLDER = "data"
+USERS_FILE = f"{DATA_FOLDER}/users.json"
+POSTS_FILE = f"{DATA_FOLDER}/posts.json"
+MESSAGES_FILE = f"{DATA_FOLDER}/messages.json"
+
+if not os.path.exists(DATA_FOLDER):
+    os.makedirs(DATA_FOLDER)
 
 # =====================================================
-# STYLE
+# UTILITAIRES JSON
 # =====================================================
 
-st.markdown("""
-<style>
+def load_json(file):
+    if not os.path.exists(file):
+        return {}
+    with open(file, "r") as f:
+        return json.load(f)
 
-.stApp{
-background:#0e1117;
-color:white;
-}
-
-.msg{
-padding:12px;
-border-radius:12px;
-background:#1c1c1c;
-margin-bottom:10px;
-border-left:4px solid #00c853;
-}
-
-.tunnel{
-background:#161b22;
-padding:12px;
-border-radius:12px;
-margin-bottom:15px;
-}
-
-</style>
-""",unsafe_allow_html=True)
+def save_json(file, data):
+    with open(file, "w") as f:
+        json.dump(data, f, indent=2)
 
 # =====================================================
-# CRYPTO SIMPLE
+# LOAD DATA
 # =====================================================
 
-class SOVEREIGN:
-
-    @staticmethod
-    def tunnel(secret):
-        return hashlib.sha256(secret.encode()).hexdigest()[:16]
-
-    @staticmethod
-    def encrypt(data):
-        return base64.b64encode(data).decode()
-
-    @staticmethod
-    def decrypt(data):
-
-        try:
-            return base64.b64decode(data)
-        except:
-            return None
+users = load_json(USERS_FILE)
+posts = load_json(POSTS_FILE)
+messages = load_json(MESSAGES_FILE)
 
 # =====================================================
-# GLOBAL NODE
+# SESSION
 # =====================================================
 
-@st.cache_resource
-def get_node():
-
-    return {
-
-        "messages":{},
-        "likes":{},
-        "groups":{},
-        "presence":{},
-        "posts":{}
-
-    }
-
-NODE=get_node()
+if "user" not in st.session_state:
+    st.session_state.user = None
 
 # =====================================================
-# LOGIN
+# AUTH
 # =====================================================
 
-if "uid" not in st.session_state:
+def login():
+    st.title("Free_Kogossa")
 
-    st.title("🇬🇦 Free_Kogossa")
+    tab1, tab2 = st.tabs(["Connexion", "Créer un compte"])
 
-    pseudo=st.text_input("Pseudo")
-    code=st.text_input("Code tunnel",type="password")
+    with tab1:
+        username = st.text_input("Nom utilisateur")
+        password = st.text_input("Mot de passe", type="password")
 
-    if st.button("Entrer"):
-
-        if pseudo and code:
-
-            st.session_state.uid=f"{pseudo}#{uuid.uuid4().hex[:3]}"
-            st.session_state.secret=code
-
-            st.rerun()
-
-    st.stop()
-
-# =====================================================
-# INIT
-# =====================================================
-
-uid=st.session_state.uid
-secret=st.session_state.secret
-sid=SOVEREIGN.tunnel(secret)
-
-NODE["messages"].setdefault(sid,[])
-NODE["likes"].setdefault(sid,{})
-NODE["posts"].setdefault(sid,[])
-
-NODE["groups"].setdefault(sid,{
-    "name":"Mon tunnel",
-    "desc":"",
-    "public":True,
-    "members":[uid],
-    "avatar":None
-})
-
-# =====================================================
-# PRESENCE
-# =====================================================
-
-now=time.time()
-
-NODE["presence"][uid]={
-"ts":now,
-"sid":sid
-}
-
-online=[u for u,d in NODE["presence"].items()
-        if now-d["ts"]<30 and d["sid"]==sid]
-
-# =====================================================
-# HEADER
-# =====================================================
-
-st.title("🇬🇦 Free_Kogossa")
-
-st.write(f"🟢 {len(online)} membres en ligne")
-
-tab1,tab2,tab3=st.tabs(
-["💬 Discussion","📢 Actu","🌐 Communautés"]
-)
-
-# =====================================================
-# DISCUSSION
-# =====================================================
-
-with tab1:
-
-    group=NODE["groups"][sid]
-
-    st.markdown("<div class='tunnel'>",unsafe_allow_html=True)
-
-    if group["avatar"]:
-        st.image(group["avatar"],width=80)
-
-    st.write(f"### {group['name']}")
-    st.write(group["desc"])
-    st.write(f"Membres : {len(group['members'])}")
-
-    st.markdown("</div>",unsafe_allow_html=True)
-
-    # message box stable
-    msg=st.text_input("Message",key="message_box")
-
-    media=st.file_uploader(
-        "Envoyer image ou vidéo",
-        type=["png","jpg","jpeg","mp4"],
-        key="media_upload"
-    )
-
-    if st.button("Envoyer"):
-
-        if msg or media:
-
-            if msg:
-                data=msg.encode()
-                typ="text"
-
-            else:
-                data=media.getvalue()
-                typ=media.type
-
-            mid=str(uuid.uuid4())
-
-            NODE["messages"][sid].append({
-
-                "id":mid,
-                "u":uid,
-                "d":SOVEREIGN.encrypt(data),
-                "t":typ,
-                "ts":time.time()
-
-            })
-
-            NODE["likes"][sid][mid]=0
-
-            st.rerun()
-
-    st.divider()
-
-    for m in reversed(NODE["messages"][sid][-60:]):
-
-        raw=SOVEREIGN.decrypt(m["d"])
-
-        if raw:
-
-            st.markdown(f"**{m['u']}**")
-
-            if m["t"]=="text":
-
-                st.markdown(
-                f"<div class='msg'>{raw.decode()}</div>",
-                unsafe_allow_html=True)
-
-            elif "image" in m["t"]:
-                st.image(raw)
-
-            elif "video" in m["t"]:
-                st.video(raw)
-
-            if st.button("❤️",key=m["id"]):
-
-                NODE["likes"][sid][m["id"]]+=1
+        if st.button("Connexion"):
+            if username in users and users[username]["password"] == password:
+                st.session_state.user = username
+                st.success("Connexion réussie")
                 st.rerun()
-
-            st.write(
-            f"{NODE['likes'][sid][m['id']]} likes"
-            )
-
-# =====================================================
-# ACTU
-# =====================================================
-
-with tab2:
-
-    st.subheader("Publier une actu")
-
-    text=st.text_area("Texte actu")
-
-    img=st.camera_input("Photo")
-
-    video=st.file_uploader(
-        "Vidéo",
-        type=["mp4"],
-        key="video_post"
-    )
-
-    if st.button("Publier actu"):
-
-        if text or img or video:
-
-            if text:
-                data=text.encode()
-                typ="text"
-
-            elif img:
-                data=img.getvalue()
-                typ="image"
-
             else:
-                data=video.getvalue()
-                typ="video"
+                st.error("Identifiants incorrects")
 
-            NODE["posts"][sid].append({
+    with tab2:
+        new_user = st.text_input("Nom utilisateur", key="newuser")
+        new_pass = st.text_input("Mot de passe", type="password", key="newpass")
 
-                "id":str(uuid.uuid4()),
-                "u":uid,
-                "d":SOVEREIGN.encrypt(data),
-                "t":typ,
-                "comments":[],
-                "ts":time.time()
-
-            })
-
-            st.rerun()
-
-    st.divider()
-
-    for p in reversed(NODE["posts"][sid][-40:]):
-
-        raw=SOVEREIGN.decrypt(p["d"])
-
-        st.markdown(f"### {p['u']}")
-
-        if p["t"]=="text":
-            st.write(raw.decode())
-
-        elif p["t"]=="image":
-            st.image(raw)
-
-        elif p["t"]=="video":
-            st.video(raw)
-
-        comment=st.text_input(
-            "Commenter",
-            key=f"c{p['id']}"
+        profile_pic = st.file_uploader(
+            "Photo de profil",
+            type=["png","jpg","jpeg"]
         )
 
-        if st.button("Envoyer",key=f"s{p['id']}"):
+        if st.button("Créer compte"):
+            if new_user in users:
+                st.error("Utilisateur existe déjà")
+            else:
 
-            if comment:
+                pic_path = ""
 
-                p["comments"].append({
-                    "u":uid,
-                    "text":comment
-                })
+                if profile_pic:
+                    pic_path = f"{DATA_FOLDER}/{new_user}_profile.png"
+                    with open(pic_path,"wb") as f:
+                        f.write(profile_pic.getbuffer())
 
-                st.rerun()
+                users[new_user] = {
+                    "password": new_pass,
+                    "profile_pic": pic_path
+                }
 
-        for c in p["comments"]:
+                save_json(USERS_FILE, users)
 
-            st.write(f"💬 {c['u']} : {c['text']}")
+                st.success("Compte créé")
+
+# =====================================================
+# FEED (ACTU + DISCUSSIONS)
+# =====================================================
+
+def feed():
+
+    st.header("Fil social")
+
+    post_text = st.text_area("Exprime toi")
+
+    post_img = st.file_uploader(
+        "Image",
+        type=["png","jpg","jpeg"]
+    )
+
+    if st.button("Publier"):
+
+        post_id = str(len(posts)+1)
+
+        img_path = ""
+
+        if post_img:
+            img_path = f"{DATA_FOLDER}/post_{post_id}.png"
+            with open(img_path,"wb") as f:
+                f.write(post_img.getbuffer())
+
+        posts[post_id] = {
+            "user": st.session_state.user,
+            "text": post_text,
+            "image": img_path,
+            "time": str(datetime.now()),
+            "comments": []
+        }
+
+        save_json(POSTS_FILE, posts)
+
+        st.rerun()
+
+    st.divider()
+
+    for p in reversed(list(posts.keys())):
+
+        post = posts[p]
+
+        st.subheader(post["user"])
+        st.write(post["text"])
+
+        if post["image"] and os.path.exists(post["image"]):
+            st.image(post["image"])
+
+        st.caption(post["time"])
+
+        st.write("Commentaires")
+
+        comment = st.text_input("Commenter", key=f"c{p}")
+
+        if st.button("Envoyer", key=f"b{p}"):
+
+            post["comments"].append({
+                "user": st.session_state.user,
+                "text": comment
+            })
+
+            save_json(POSTS_FILE, posts)
+
+            st.rerun()
+
+        for c in post["comments"]:
+            st.write(f"**{c['user']}** : {c['text']}")
 
         st.divider()
 
 # =====================================================
-# COMMUNAUTES
+# MESSAGERIE
 # =====================================================
 
-with tab3:
+def messenger():
 
-    st.subheader("Gestion tunnel")
+    st.header("Messagerie")
 
-    g=NODE["groups"][sid]
+    users_list = [u for u in users if u != st.session_state.user]
 
-    name=st.text_input("Nom tunnel",value=g["name"])
-    desc=st.text_area("Description",value=g["desc"])
+    target = st.selectbox("Choisir utilisateur", users_list)
 
-    public=st.checkbox(
-        "Tunnel public",
-        value=g["public"]
-    )
+    if not target:
+        return
 
-    avatar=st.file_uploader(
-        "Photo tunnel",
-        type=["png","jpg","jpeg"],
-        key="avatar"
-    )
+    conv_id = "_".join(sorted([st.session_state.user,target]))
 
-    if st.button("Mettre à jour"):
+    if conv_id not in messages:
+        messages[conv_id] = []
 
-        g["name"]=name
-        g["desc"]=desc
-        g["public"]=public
+    for m in messages[conv_id]:
+        st.write(f"**{m['sender']}** : {m['text']}")
 
-        if avatar:
-            g["avatar"]=avatar.getvalue()
+    msg = st.text_input("Message")
+
+    if st.button("Envoyer message"):
+
+        messages[conv_id].append({
+            "sender": st.session_state.user,
+            "text": msg,
+            "time": str(datetime.now())
+        })
+
+        save_json(MESSAGES_FILE, messages)
 
         st.rerun()
 
-    st.divider()
+# =====================================================
+# PROFIL
+# =====================================================
 
-    st.write("Code invitation")
+def profile():
 
-    st.code(secret)
+    st.header("Profil")
 
-    if st.button("Quitter tunnel"):
+    user = st.session_state.user
 
-        st.session_state.clear()
+    if users[user]["profile_pic"]:
+        st.image(users[user]["profile_pic"], width=150)
+
+    new_pic = st.file_uploader("Changer photo", type=["png","jpg","jpeg"])
+
+    if new_pic:
+
+        path = f"{DATA_FOLDER}/{user}_profile.png"
+
+        with open(path,"wb") as f:
+            f.write(new_pic.getbuffer())
+
+        users[user]["profile_pic"] = path
+
+        save_json(USERS_FILE, users)
+
         st.rerun()
 
 # =====================================================
-# AUTO REFRESH
+# MAIN
 # =====================================================
 
-st_autorefresh(
-interval=3000,
-key="refresh"
-)
+if not st.session_state.user:
+
+    login()
+
+else:
+
+    st.sidebar.title("Free_Kogossa")
+
+    page = st.sidebar.radio(
+        "Navigation",
+        ["Fil social","Messagerie","Profil"]
+    )
+
+    if st.sidebar.button("Déconnexion"):
+        st.session_state.user = None
+        st.rerun()
+
+    if page == "Fil social":
+        feed()
+
+    if page == "Messagerie":
+        messenger()
+
+    if page == "Profil":
+        profile()
