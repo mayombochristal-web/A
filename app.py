@@ -200,11 +200,26 @@ with tab1:
 
     my_groups = [g for g in groups if st.session_state.user in g["members"]]
 
+    if len(my_groups) == 0:
+
+        st.info("Vous n'êtes dans aucun tunnel pour le moment.")
+        st.write("👉 Rejoignez ou créez un tunnel dans l'onglet Communautés.")
+        st.stop()
+
     names = [g["name"] for g in my_groups]
 
-    group_name = st.selectbox("Choisir tunnel",names)
+    group_name = st.selectbox("Choisir tunnel", names)
 
-    group = next(g for g in my_groups if g["name"]==group_name)
+    group = None
+
+    for g in my_groups:
+        if g["name"] == group_name:
+            group = g
+            break
+
+    if group is None:
+        st.warning("Tunnel introuvable")
+        st.stop()
 
     st.write(f"### {group['name']}")
 
@@ -212,13 +227,17 @@ with tab1:
 
     if st.button("Envoyer"):
 
-        group["messages"].append({
-            "user":st.session_state.user,
-            "text":msg,
-            "time":time.time()
-        })
+        if msg.strip() != "":
 
-        save(FILES["groups"],groups)
+            group["messages"].append({
+                "user": st.session_state.user,
+                "text": msg,
+                "time": time.time()
+            })
+
+            save(FILES["groups"], groups)
+
+            st.rerun()
 
     st.divider()
 
