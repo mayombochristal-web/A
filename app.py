@@ -34,22 +34,15 @@ def hash_password(password):
 def upload_to_storage(file_data, filename, content_type=None):
     """
     Upload un fichier vers le bucket 'uploads' (public) et retourne l'URL publique.
-    file_data: bytes ou BytesIO
-    filename: nom du fichier (unique de préférence)
-    content_type: type MIME (optionnel)
+    Retourne None en cas d'échec.
     """
     try:
-        # Upload du fichier
         supabase.storage.from_(BUCKET_NAME).upload(
             path=filename,
             file=file_data,
             file_options={"content-type": content_type} if content_type else {}
         )
-        # Récupération de l'URL publique
         public_url = supabase.storage.from_(BUCKET_NAME).get_public_url(filename)
-        if not public_url:
-            st.error("L'URL publique n'a pas pu être générée.")
-            return None
         return public_url
     except Exception as e:
         st.error(f"Erreur d'upload : {e}")
@@ -106,6 +99,9 @@ def login():
                     ext = pic.name.split('.')[-1]
                     filename = f"profile_{new_user}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{ext}"
                     profile_pic_url = upload_to_storage(pic.getvalue(), filename, pic.type)
+                    if not profile_pic_url:
+                        st.error("Échec de l'upload de la photo de profil. Compte non créé.")
+                        st.stop()
 
                 # Insertion dans Supabase
                 user_dict = {
@@ -184,16 +180,18 @@ def feed():
             ext = img.name.split('.')[-1]
             filename = f"post_img_{st.session_state.user}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{ext}"
             media_url = upload_to_storage(img.getvalue(), filename, img.type)
+            if not media_url:
+                st.error("L'image n'a pas pu être uploadée. Publication annulée.")
+                st.stop()
             media_type = "image"
         elif video is not None:
             ext = video.name.split('.')[-1]
             filename = f"post_vid_{st.session_state.user}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{ext}"
             media_url = upload_to_storage(video.getvalue(), filename, video.type)
+            if not media_url:
+                st.error("La vidéo n'a pas pu être uploadée. Publication annulée.")
+                st.stop()
             media_type = "video"
-
-        if not media_url:
-            st.error("L'upload a échoué, le message n'a pas été publié.")
-            st.stop()
 
         # Insertion du post dans Supabase
         post_dict = {
@@ -218,7 +216,7 @@ def feed():
 
             media_url = post.get("media_path", "")
             media_type = post.get("media_type")
-            if media_url:
+            if media_url and media_type:
                 if media_type == "image":
                     st.image(media_url)
                 elif media_type == "video":
@@ -337,37 +335,47 @@ def messenger():
             "sender": st.session_state.user,
             "recipient": target,
         }
+        upload_success = False
 
-        url = None
         if audio_bytes is not None:
             filename = f"voice_{st.session_state.user}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.wav"
             url = upload_to_storage(audio_bytes, filename, "audio/wav")
             if url:
                 message_dict["audio_path"] = url
+                upload_success = True
+            else:
+                st.error("L'enregistrement audio n'a pas pu être uploadé.")
+                st.stop()
         elif audio_file is not None:
             ext = audio_file.name.split('.')[-1]
             filename = f"audio_{st.session_state.user}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{ext}"
             url = upload_to_storage(audio_file.getvalue(), filename, audio_file.type)
             if url:
                 message_dict["audio_path"] = url
+                upload_success = True
+            else:
+                st.error("Le fichier audio n'a pas pu être uploadé.")
+                st.stop()
         elif video_file is not None:
             ext = video_file.name.split('.')[-1]
             filename = f"video_{st.session_state.user}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{ext}"
             url = upload_to_storage(video_file.getvalue(), filename, video_file.type)
             if url:
                 message_dict["video_path"] = url
+                upload_success = True
+            else:
+                st.error("Le fichier vidéo n'a pas pu être uploadé.")
+                st.stop()
         elif text_msg.strip() != "":
             message_dict["text"] = text_msg
+            upload_success = True  # Pas d'upload nécessaire
         else:
             st.warning("Écris un message, enregistre un audio ou ajoute un fichier.")
             st.stop()
 
-        if url is None and "text" not in message_dict:
-            st.error("L'upload a échoué, le message n'a pas été envoyé.")
-            st.stop()
-
-        supabase.table("messages").insert(message_dict).execute()
-        st.rerun()
+        if upload_success:
+            supabase.table("messages").insert(message_dict).execute()
+            st.rerun()
 
 # =====================================================
 # PROFIL (AVEC SUPABASE STORAGE)
@@ -410,6 +418,9 @@ def profile():
             pic_url = upload_to_storage(new_pic.getvalue(), filename, new_pic.type)
             if pic_url:
                 update_dict["profile_pic"] = pic_url
+            else:
+                st.error("Échec de l'upload de la nouvelle photo. Mise à jour annulée.")
+                st.stop()
 
         if update_dict:
             supabase.table("profiles").update(update_dict).eq("username", user).execute()
