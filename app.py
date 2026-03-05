@@ -15,8 +15,8 @@ url = st.secrets["supabase"]["url"]
 key = st.secrets["supabase"]["key"]
 supabase: Client = create_client(url, key)
 
-DATA_FOLDER = "data"          # Pour fichiers temporaires (optionnel)
-ASSETS_FOLDER = "assets"      # Pour la photo du créateur
+DATA_FOLDER = "data"
+ASSETS_FOLDER = "assets"
 os.makedirs(DATA_FOLDER, exist_ok=True)
 os.makedirs(ASSETS_FOLDER, exist_ok=True)
 
@@ -86,7 +86,6 @@ def login():
         pic = st.file_uploader("Photo profil", type=["png", "jpg", "jpeg"])
 
         if st.button("Créer compte"):
-            # Vérifier si l'utilisateur existe
             check = supabase.table("profiles").select("username").eq("username", new_user).execute()
             if check.data:
                 st.error("Ce pseudo est déjà pris")
@@ -95,7 +94,6 @@ def login():
             else:
                 profile_pic_url = ""
                 if pic:
-                    # Générer un nom de fichier unique
                     ext = pic.name.split('.')[-1]
                     filename = f"profile_{new_user}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{ext}"
                     profile_pic_url = upload_to_storage(pic.getvalue(), filename, pic.type)
@@ -103,7 +101,6 @@ def login():
                         st.error("Échec de l'upload de la photo de profil. Compte non créé.")
                         st.stop()
 
-                # Insertion dans Supabase
                 user_dict = {
                     "username": new_user,
                     "password": hash_password(new_pass),
@@ -193,7 +190,6 @@ def feed():
                 st.stop()
             media_type = "video"
 
-        # Insertion du post dans Supabase
         post_dict = {
             "username": st.session_state.user,
             "text": text,
@@ -205,7 +201,6 @@ def feed():
 
     st.divider()
 
-    # Récupération des 20 derniers posts
     posts_response = supabase.table("posts").select("*").order("created_at", desc=True).limit(20).execute()
     posts_list = posts_response.data if posts_response.data else []
 
@@ -222,11 +217,9 @@ def feed():
                 elif media_type == "video":
                     st.video(media_url)
 
-            # Formatage de la date
             created_at = datetime.fromisoformat(post["created_at"].replace("Z", "+00:00"))
             st.caption(created_at.strftime("%Y-%m-%d %H:%M"))
 
-            # Récupération des commentaires
             comments_response = supabase.table("comments").select("*").eq("post_id", post["id"]).order("created_at").execute()
             comments = comments_response.data if comments_response.data else []
 
@@ -253,7 +246,6 @@ def messenger():
     st_autorefresh(interval=2000, key="msg_refresh")
     st.header("Messagerie")
 
-    # Liste des autres utilisateurs
     users_response = supabase.table("profiles").select("username").neq("username", st.session_state.user).execute()
     users_list = [u["username"] for u in users_response.data] if users_response.data else []
 
@@ -263,15 +255,12 @@ def messenger():
 
     target = st.selectbox("Choisir utilisateur", users_list, key="msg_target")
 
-    # Récupération des messages entre les deux utilisateurs
     from_user = st.session_state.user
-    # Requête avec OR pour les deux sens
     messages_response = supabase.table("messages").select("*")\
         .or_(f"sender.eq.{from_user},recipient.eq.{from_user}")\
         .or_(f"sender.eq.{target},recipient.eq.{target}")\
         .order("created_at").execute()
     all_msgs = messages_response.data if messages_response.data else []
-    # Filtrer pour n'avoir que les échanges entre les deux
     filtered_msgs = [
         m for m in all_msgs
         if (m["sender"] == from_user and m["recipient"] == target) or
@@ -285,7 +274,7 @@ def messenger():
         else:
             prefix = f"🔵 **{m['sender']}** : "
 
-        if m.get("audio_path"):  # contient une URL
+        if m.get("audio_path"):
             st.write(prefix + "[Message audio]")
             st.audio(m["audio_path"])
         elif m.get("video_path"):
@@ -314,7 +303,6 @@ def messenger():
         )
 
     if st.button("Envoyer message", type="primary"):
-        # Vérification de la taille des fichiers (max 50 Mo)
         if audio_file is not None and audio_file.size > 50 * 1024 * 1024:
             st.error("Fichier audio trop lourd (max 50 Mo)")
             st.stop()
@@ -323,7 +311,6 @@ def messenger():
             st.error("Fichier vidéo trop lourd (max 50 Mo)")
             st.stop()
 
-        # Extraction des bytes de l'enregistrement
         audio_bytes = None
         if recorder_output is not None:
             if isinstance(recorder_output, dict):
@@ -368,7 +355,7 @@ def messenger():
                 st.stop()
         elif text_msg.strip() != "":
             message_dict["text"] = text_msg
-            upload_success = True  # Pas d'upload nécessaire
+            upload_success = True
         else:
             st.warning("Écris un message, enregistre un audio ou ajoute un fichier.")
             st.stop()
@@ -412,7 +399,6 @@ def profile():
         if new_loc != profile_data.get("location"):
             update_dict["location"] = new_loc
         if new_pic:
-            # Upload de la nouvelle photo
             ext = new_pic.name.split('.')[-1]
             filename = f"profile_{user}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{ext}"
             pic_url = upload_to_storage(new_pic.getvalue(), filename, new_pic.type)
