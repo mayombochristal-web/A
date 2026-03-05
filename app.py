@@ -21,20 +21,17 @@ os.makedirs(DATA_FOLDER, exist_ok=True)
 # =====================================================
 
 def load_json(file):
-
     if not os.path.exists(file):
         return {}
-
     try:
-        with open(file,"r") as f:
+        with open(file, "r") as f:
             return json.load(f)
     except:
         return {}
 
-def save_json(file,data):
-
-    with open(file,"w") as f:
-        json.dump(data,f,indent=2)
+def save_json(file, data):
+    with open(file, "w") as f:
+        json.dump(data, f, indent=2)
 
 # =====================================================
 # LOAD DATA
@@ -49,75 +46,53 @@ messages = load_json(MESSAGES_FILE)
 # =====================================================
 
 if "user" not in st.session_state:
-    st.session_state.user=None
+    st.session_state.user = None
 
 # =====================================================
 # LOGIN / REGISTER
 # =====================================================
 
 def login():
-
     st.title("🌍 Free_Kogossa")
 
-    tab1,tab2 = st.tabs(["Connexion","Créer compte"])
-
-    # LOGIN
+    tab1, tab2 = st.tabs(["Connexion", "Créer compte"])
 
     with tab1:
-
         username = st.text_input("Nom utilisateur")
-        password = st.text_input("Mot de passe",type="password")
+        password = st.text_input("Mot de passe", type="password")
 
         if st.button("Connexion"):
-
-            if username in users and users[username]["password"]==password:
-
-                st.session_state.user=username
+            if username in users and users[username]["password"] == password:
+                st.session_state.user = username
                 st.rerun()
-
             else:
-
                 st.error("Identifiants incorrects")
 
-    # REGISTER
-
     with tab2:
-
-        new_user = st.text_input("Nom utilisateur",key="newuser")
-        new_pass = st.text_input("Mot de passe",type="password",key="newpass")
-
+        new_user = st.text_input("Nom utilisateur", key="newuser")
+        new_pass = st.text_input("Mot de passe", type="password", key="newpass")
         bio = st.text_area("Bio")
         location = st.text_input("Localisation")
-
-        pic = st.file_uploader("Photo profil",type=["png","jpg","jpeg"])
+        pic = st.file_uploader("Photo profil", type=["png", "jpg", "jpeg"])
 
         if st.button("Créer compte"):
-
             if new_user in users:
-
                 st.error("Utilisateur existe déjà")
-
             else:
-
-                pic_path=""
-
+                pic_path = ""
                 if pic:
-
-                    pic_path=f"{DATA_FOLDER}/{new_user}_profile.png"
-
-                    with open(pic_path,"wb") as f:
+                    pic_path = f"{DATA_FOLDER}/{new_user}_profile.png"
+                    with open(pic_path, "wb") as f:
                         f.write(pic.getbuffer())
 
-                users[new_user]={
-                    "password":new_pass,
-                    "bio":bio,
-                    "location":location,
-                    "profile_pic":pic_path,
-                    "created":str(datetime.now())
+                users[new_user] = {
+                    "password": new_pass,
+                    "bio": bio,
+                    "location": location,
+                    "profile_pic": pic_path,
+                    "created": str(datetime.now())
                 }
-
-                save_json(USERS_FILE,users)
-
+                save_json(USERS_FILE, users)
                 st.success("Compte créé")
 
 # =====================================================
@@ -125,30 +100,21 @@ def login():
 # =====================================================
 
 def banner():
-
-    user=st.session_state.user
-
+    user = st.session_state.user
     st.divider()
-
-    col1,col2=st.columns([1,4])
+    col1, col2 = st.columns([1, 4])
 
     with col1:
-
-        pic=users[user].get("profile_pic","")
-
+        pic = users[user].get("profile_pic", "")
         if pic and os.path.exists(pic):
-
-            st.image(pic,width=120)
+            st.image(pic, width=120)
 
     with col2:
-
         st.title(user)
-
         if users[user].get("bio"):
             st.write(users[user]["bio"])
-
         if users[user].get("location"):
-            st.caption("📍 "+users[user]["location"])
+            st.caption("📍 " + users[user]["location"])
 
     st.divider()
 
@@ -157,48 +123,37 @@ def banner():
 # =====================================================
 
 def feed():
-
     banner()
-
     st.subheader("Exprime toi")
 
     text = st.text_area("Message")
-
-    img = st.file_uploader("Image",type=["png","jpg","jpeg"])
+    img = st.file_uploader("Image", type=["png", "jpg", "jpeg"])
 
     if st.button("Publier"):
-
-        post_id=str(len(posts)+1)
-
-        img_path=""
+        post_id = str(len(posts) + 1)
+        img_path = ""
 
         if img:
-
-            img_path=f"{DATA_FOLDER}/post_{post_id}.png"
-
-            with open(img_path,"wb") as f:
+            img_path = f"{DATA_FOLDER}/post_{post_id}.png"
+            with open(img_path, "wb") as f:
                 f.write(img.getbuffer())
 
-        posts[post_id]={
-            "user":st.session_state.user,
-            "text":text,
-            "image":img_path,
-            "time":datetime.now().timestamp(),
-            "comments":[]
+        posts[post_id] = {
+            "user": st.session_state.user,
+            "text": text,
+            "image": img_path,
+            "time": datetime.now().timestamp(),
+            "comments": []
         }
-
-        save_json(POSTS_FILE,posts)
-
+        save_json(POSTS_FILE, posts)
         st.rerun()
 
     st.divider()
 
-    ordered = sorted(posts.items(),key=lambda x:x[1]["time"],reverse=True)
+    ordered = sorted(posts.items(), key=lambda x: x[1]["time"], reverse=True)
 
-    for pid,post in ordered:
-
+    for pid, post in ordered:
         st.subheader(post["user"])
-
         st.write(post["text"])
 
         if post["image"] and os.path.exists(post["image"]):
@@ -206,117 +161,159 @@ def feed():
 
         st.caption(datetime.fromtimestamp(post["time"]))
 
-        comment=st.text_input("Commenter",key=f"c{pid}")
-
-        if st.button("Envoyer",key=f"b{pid}"):
-
+        comment = st.text_input("Commenter", key=f"c{pid}")
+        if st.button("Envoyer", key=f"b{pid}"):
             post["comments"].append({
-                "user":st.session_state.user,
-                "text":comment
+                "user": st.session_state.user,
+                "text": comment
             })
-
-            save_json(POSTS_FILE,posts)
-
+            save_json(POSTS_FILE, posts)
             st.rerun()
 
         for c in post["comments"]:
-
             st.write(f"**{c['user']}** : {c['text']}")
 
         st.divider()
 
 # =====================================================
-# MESSENGER
+# MESSENGER (avec audio/vidéo et bouton Rafraîchir)
 # =====================================================
 
 def messenger():
-
     st.header("Messagerie")
 
-    users_list=[u for u in users if u!=st.session_state.user]
+    # Bouton de rafraîchissement manuel
+    if st.button("🔄 Rafraîchir la conversation"):
+        st.rerun()
+
+    users_list = [u for u in users if u != st.session_state.user]
 
     if not users_list:
-
-        st.info("Aucun utilisateur")
+        st.info("Aucun autre utilisateur")
         return
 
-    target=st.selectbox("Choisir utilisateur",users_list)
-
-    conv_id="_".join(sorted([st.session_state.user,target]))
+    target = st.selectbox("Choisir utilisateur", users_list, key="msg_target")
+    conv_id = "_".join(sorted([st.session_state.user, target]))
 
     if conv_id not in messages:
-        messages[conv_id]=[]
+        messages[conv_id] = []
 
-    ordered=sorted(messages[conv_id],key=lambda x:x["time"])
+    # Afficher les messages existants
+    ordered = sorted(messages[conv_id], key=lambda x: x["time"])
 
     for m in ordered:
-
-        if m["sender"]==st.session_state.user:
-
-            st.write(f"🟢 **Moi** : {m['text']}")
-
+        if m["sender"] == st.session_state.user:
+            prefix = "🟢 **Moi** : "
         else:
+            prefix = f"🔵 **{m['sender']}** : "
 
-            st.write(f"🔵 **{m['sender']}** : {m['text']}")
+        if "audio_path" in m and os.path.exists(m["audio_path"]):
+            st.write(prefix + "[Message audio]")
+            st.audio(m["audio_path"])
+        elif "video_path" in m and os.path.exists(m["video_path"]):
+            st.write(prefix + "[Message vidéo]")
+            st.video(m["video_path"])
+        else:
+            # message texte
+            st.write(prefix + m.get("text", ""))
 
-    msg=st.text_input("Message")
+    st.divider()
+
+    # Saisie d'un nouveau message
+    st.subheader("Nouveau message")
+    col_text, col_audio, col_video = st.columns(3)
+
+    with col_text:
+        text_msg = st.text_area("Texte", key="msg_text", height=100)
+
+    with col_audio:
+        audio_file = st.file_uploader(
+            "Fichier audio", type=["mp3", "wav", "ogg"], key="msg_audio"
+        )
+
+    with col_video:
+        video_file = st.file_uploader(
+            "Fichier vidéo", type=["mp4", "mov", "avi"], key="msg_video"
+        )
 
     if st.button("Envoyer message"):
-
-        if msg.strip()!="":
+        # Déterminer le type de message (priorité : audio > vidéo > texte)
+        if audio_file is not None:
+            # Enregistrer l'audio
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            audio_path = f"{DATA_FOLDER}/audio_{st.session_state.user}_{timestamp}.audio"
+            with open(audio_path, "wb") as f:
+                f.write(audio_file.getbuffer())
 
             messages[conv_id].append({
-                "sender":st.session_state.user,
-                "text":msg,
-                "time":datetime.now().timestamp()
+                "sender": st.session_state.user,
+                "audio_path": audio_path,
+                "time": datetime.now().timestamp()
             })
-
-            save_json(MESSAGES_FILE,messages)
-
+            save_json(MESSAGES_FILE, messages)
             st.rerun()
+
+        elif video_file is not None:
+            # Enregistrer la vidéo
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            video_path = f"{DATA_FOLDER}/video_{st.session_state.user}_{timestamp}.video"
+            with open(video_path, "wb") as f:
+                f.write(video_file.getbuffer())
+
+            messages[conv_id].append({
+                "sender": st.session_state.user,
+                "video_path": video_path,
+                "time": datetime.now().timestamp()
+            })
+            save_json(MESSAGES_FILE, messages)
+            st.rerun()
+
+        elif text_msg.strip() != "":
+            # Message texte
+            messages[conv_id].append({
+                "sender": st.session_state.user,
+                "text": text_msg,
+                "time": datetime.now().timestamp()
+            })
+            save_json(MESSAGES_FILE, messages)
+            st.rerun()
+
+        else:
+            st.warning("Écris un message ou ajoute un fichier audio/vidéo.")
 
 # =====================================================
 # PROFILE
 # =====================================================
 
 def profile():
-
-    user=st.session_state.user
-
+    user = st.session_state.user
     st.header("Profil")
 
-    pic=users[user].get("profile_pic","")
-
+    pic = users[user].get("profile_pic", "")
     if pic and os.path.exists(pic):
-        st.image(pic,width=150)
+        st.image(pic, width=150)
 
-    st.write("Bio :",users[user].get("bio",""))
-    st.write("Localisation :",users[user].get("location",""))
-    st.caption("Compte créé : "+users[user]["created"])
+    st.write("Bio :", users[user].get("bio", ""))
+    st.write("Localisation :", users[user].get("location", ""))
+    st.caption("Compte créé : " + users[user]["created"])
 
     st.subheader("Modifier")
 
-    new_bio=st.text_area("Bio",value=users[user].get("bio",""))
-    new_loc=st.text_input("Localisation",value=users[user].get("location",""))
-
-    new_pic=st.file_uploader("Changer photo",type=["png","jpg","jpeg"])
+    new_bio = st.text_area("Bio", value=users[user].get("bio", ""))
+    new_loc = st.text_input("Localisation", value=users[user].get("location", ""))
+    new_pic = st.file_uploader("Changer photo", type=["png", "jpg", "jpeg"])
 
     if st.button("Mettre à jour profil"):
-
-        users[user]["bio"]=new_bio
-        users[user]["location"]=new_loc
+        users[user]["bio"] = new_bio
+        users[user]["location"] = new_loc
 
         if new_pic:
-
-            path=f"{DATA_FOLDER}/{user}_profile.png"
-
-            with open(path,"wb") as f:
+            path = f"{DATA_FOLDER}/{user}_profile.png"
+            with open(path, "wb") as f:
                 f.write(new_pic.getbuffer())
+            users[user]["profile_pic"] = path
 
-            users[user]["profile_pic"]=path
-
-        save_json(USERS_FILE,users)
-
+        save_json(USERS_FILE, users)
         st.rerun()
 
 # =====================================================
@@ -324,28 +321,21 @@ def profile():
 # =====================================================
 
 if not st.session_state.user:
-
     login()
-
 else:
-
     st.sidebar.title("Free_Kogossa")
-
-    page=st.sidebar.radio(
+    page = st.sidebar.radio(
         "Navigation",
-        ["Fil social","Messagerie","Profil"]
+        ["Fil social", "Messagerie", "Profil"]
     )
 
     if st.sidebar.button("Déconnexion"):
-
-        st.session_state.user=None
+        st.session_state.user = None
         st.rerun()
 
-    if page=="Fil social":
+    if page == "Fil social":
         feed()
-
-    if page=="Messagerie":
+    elif page == "Messagerie":
         messenger()
-
-    if page=="Profil":
+    elif page == "Profil":
         profile()
