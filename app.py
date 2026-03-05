@@ -17,6 +17,22 @@ MESSAGES_FILE = f"{DATA_FOLDER}/messages.json"
 os.makedirs(DATA_FOLDER, exist_ok=True)
 
 # =====================================================
+# IMPORTS POUR AUTO-REFRESH ET AUDIO RECORDER
+# =====================================================
+# Nécessite : pip install streamlit-autorefresh streamlit-audio-recorder
+try:
+    from streamlit_autorefresh import st_autorefresh
+except ImportError:
+    st.error("Veuillez installer streamlit-autorefresh : pip install streamlit-autorefresh")
+    st.stop()
+
+try:
+    from streamlit_audio_recorder import audio_recorder
+except ImportError:
+    st.error("Veuillez installer streamlit-audio-recorder : pip install streamlit-audio-recorder")
+    st.stop()
+
+# =====================================================
 # JSON UTILS
 # =====================================================
 
@@ -119,10 +135,13 @@ def banner():
     st.divider()
 
 # =====================================================
-# SOCIAL FEED
+# SOCIAL FEED (avec auto-refresh)
 # =====================================================
 
 def feed():
+    # Auto-refresh toutes les 3 secondes
+    st_autorefresh(interval=3000, key="feed_refresh")
+
     banner()
     st.subheader("Exprime toi")
 
@@ -176,15 +195,14 @@ def feed():
         st.divider()
 
 # =====================================================
-# MESSENGER (avec audio/vidéo et bouton Rafraîchir)
+# MESSENGER (auto-refresh + enregistrement vocal)
 # =====================================================
 
 def messenger():
-    st.header("Messagerie")
+    # Auto-refresh toutes les 2 secondes
+    st_autorefresh(interval=2000, key="msg_refresh")
 
-    # Bouton de rafraîchissement manuel
-    if st.button("🔄 Rafraîchir la conversation"):
-        st.rerun()
+    st.header("Messagerie")
 
     users_list = [u for u in users if u != st.session_state.user]
 
@@ -221,25 +239,53 @@ def messenger():
 
     # Saisie d'un nouveau message
     st.subheader("Nouveau message")
-    col_text, col_audio, col_video = st.columns(3)
 
-    with col_text:
-        text_msg = st.text_area("Texte", key="msg_text", height=100)
+    # Utilisation de colonnes pour disposer les différents types d'envoi
+    col1, col2, col3, col4 = st.columns(4)
 
-    with col_audio:
+    with col1:
+        text_msg = st.text_area("Texte", key="msg_text", height=100, label_visibility="collapsed", placeholder="Écris ton message...")
+
+    with col2:
         audio_file = st.file_uploader(
-            "Fichier audio", type=["mp3", "wav", "ogg"], key="msg_audio"
+            "🎵 Audio (fichier)", type=["mp3", "wav", "ogg"], key="msg_audio"
         )
 
-    with col_video:
+    with col3:
         video_file = st.file_uploader(
-            "Fichier vidéo", type=["mp4", "mov", "avi"], key="msg_video"
+            "🎬 Vidéo (fichier)", type=["mp4", "mov", "avi"], key="msg_video"
         )
 
-    if st.button("Envoyer message"):
-        # Déterminer le type de message (priorité : audio > vidéo > texte)
-        if audio_file is not None:
-            # Enregistrer l'audio
+    with col4:
+        st.write("🎙️ Enregistrement vocal")
+        audio_bytes = audio_recorder(
+            text="Clique pour enregistrer",
+            recording_color="#e74c3c",
+            neutral_color="#6aa36f",
+            icon_name="microphone",
+            key="voice_recorder"
+        )
+
+    # Bouton d'envoi unique (gère tous les types)
+    if st.button("Envoyer message", type="primary"):
+        # 1. Vérifier s'il y a un enregistrement vocal
+        if audio_bytes is not None:
+            # Sauvegarder l'audio enregistré
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            audio_path = f"{DATA_FOLDER}/voice_{st.session_state.user}_{timestamp}.wav"
+            with open(audio_path, "wb") as f:
+                f.write(audio_bytes)
+
+            messages[conv_id].append({
+                "sender": st.session_state.user,
+                "audio_path": audio_path,
+                "time": datetime.now().timestamp()
+            })
+            save_json(MESSAGES_FILE, messages)
+            st.rerun()
+
+        # 2. Sinon, vérifier l'upload audio
+        elif audio_file is not None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             audio_path = f"{DATA_FOLDER}/audio_{st.session_state.user}_{timestamp}.audio"
             with open(audio_path, "wb") as f:
@@ -253,8 +299,8 @@ def messenger():
             save_json(MESSAGES_FILE, messages)
             st.rerun()
 
+        # 3. Sinon, vérifier l'upload vidéo
         elif video_file is not None:
-            # Enregistrer la vidéo
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             video_path = f"{DATA_FOLDER}/video_{st.session_state.user}_{timestamp}.video"
             with open(video_path, "wb") as f:
@@ -268,8 +314,8 @@ def messenger():
             save_json(MESSAGES_FILE, messages)
             st.rerun()
 
+        # 4. Sinon, message texte
         elif text_msg.strip() != "":
-            # Message texte
             messages[conv_id].append({
                 "sender": st.session_state.user,
                 "text": text_msg,
@@ -279,7 +325,7 @@ def messenger():
             st.rerun()
 
         else:
-            st.warning("Écris un message ou ajoute un fichier audio/vidéo.")
+            st.warning("Écris un message, enregistre un audio ou ajoute un fichier.")
 
 # =====================================================
 # PROFILE
