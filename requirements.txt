@@ -1,4 +1,5 @@
 streamlit
+supabase
 streamlit-autorefresh
 streamlit-mic-recorder
-supabase
+plotly
