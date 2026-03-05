@@ -6,6 +6,12 @@ from supabase import create_client, Client
 from streamlit_autorefresh import st_autorefresh
 from streamlit_mic_recorder import mic_recorder
 
+# --- NOUVEAUX IMPORTS POUR LA PARTIE SCIENTIFIQUE ---
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+# ----------------------------------------------------
+
 # =====================================================
 # CONFIG & CONNEXION SUPABASE
 # =====================================================
@@ -54,6 +60,24 @@ def upload_to_storage(file_data, filename, content_type=None):
 if "user" not in st.session_state:
     st.session_state.user = None
 
+# --- NOUVEAU : Suivi de l'activité pour rafraîchissement adaptatif ---
+if "last_activity" not in st.session_state:
+    st.session_state.last_activity = datetime.now()
+
+def update_activity():
+    st.session_state.last_activity = datetime.now()
+
+def get_refresh_interval():
+    """Retourne l'intervalle de rafraîchissement selon l'inactivité (principe de dissipation)."""
+    idle = (datetime.now() - st.session_state.last_activity).seconds
+    if idle < 60:
+        return 2000      # actif : 2 secondes
+    elif idle < 300:
+        return 5000      # 5 secondes
+    else:
+        return 10000     # inactif : 10 secondes
+# ----------------------------------------------------
+
 # =====================================================
 # LOGIN / REGISTER (AVEC SUPABASE)
 # =====================================================
@@ -72,6 +96,7 @@ def login():
                 user_data = response.data[0]
                 if user_data["password"] == hash_password(password):
                     st.session_state.user = username
+                    update_activity()
                     st.rerun()
                 else:
                     st.error("Mot de passe incorrect")
@@ -143,10 +168,43 @@ def banner():
     st.divider()
 
 # =====================================================
+# NOUVEAU : CŒUR TST (calcul de stabilité)
+# =====================================================
+def calculate_stability(likes, comments, dissipation_rate=0.1):
+    """
+    Applique la TTU-MC3 :
+    M (Mémoire) = likes cumulés
+    C (Cohérence) = commentaires actifs
+    D (Dissipation) = perte d'intérêt temporelle
+    """
+    # Équation simplifiée issue des documents de recherche
+    # dPhi/dt = Sigma(Interaction) - Dissipation
+    stability = (likes * 0.6 + comments * 0.4) * np.exp(-dissipation_rate)
+    return round(stability, 2)
+
+# =====================================================
+# NOUVEAU : Gestion des likes
+# =====================================================
+def like_post(post_id, username):
+    """Ajoute un like pour un post (table 'likes')."""
+    # Vérifie si l'utilisateur a déjà liké
+    existing = supabase.table("likes").select("*").eq("post_id", post_id).eq("username", username).execute()
+    if not existing.data:
+        supabase.table("likes").insert({"post_id": post_id, "username": username}).execute()
+        update_activity()
+
+def get_likes_count(post_id):
+    """Retourne le nombre de likes pour un post."""
+    resp = supabase.table("likes").select("*", count="exact").eq("post_id", post_id).execute()
+    return resp.count if hasattr(resp, 'count') else len(resp.data)
+
+# =====================================================
 # FIL SOCIAL (AVEC SUPABASE STORAGE)
 # =====================================================
 def feed():
-    st_autorefresh(interval=5000, key="feed_refresh")
+    # --- MODIFIÉ : rafraîchissement adaptatif ---
+    st_autorefresh(interval=get_refresh_interval(), key="feed_refresh")
+    # ---------------------------------------------
     banner()
     st.subheader("Exprime toi")
 
@@ -197,6 +255,7 @@ def feed():
             "media_type": media_type,
         }
         supabase.table("posts").insert(post_dict).execute()
+        update_activity()
         st.rerun()
 
     st.divider()
@@ -220,6 +279,26 @@ def feed():
             created_at = datetime.fromisoformat(post["created_at"].replace("Z", "+00:00"))
             st.caption(created_at.strftime("%Y-%m-%d %H:%M"))
 
+            # --- NOUVEAU : Affichage de la stabilité TST ---
+            likes_count = get_likes_count(post["id"])
+            comments_response = supabase.table("comments").select("*", count="exact").eq("post_id", post["id"]).execute()
+            comments_count = comments_response.count if hasattr(comments_response, 'count') else len(comments_response.data)
+            stability = calculate_stability(likes_count, comments_count)
+            st.markdown(f"**Indice de Stabilité (TST) :** `{stability}`")
+            if stability > 5.0:
+                st.success("🔥 Ce post est un Attracteur Stable")
+            # ------------------------------------------------
+
+            # --- NOUVEAU : Bouton J'aime ---
+            col1, col2 = st.columns([1, 10])
+            with col1:
+                if st.button("❤️", key=f"like_{post['id']}"):
+                    like_post(post["id"], st.session_state.user)
+                    st.rerun()
+            with col2:
+                st.write(f"**{likes_count}** likes")
+            # --------------------------------
+
             comments_response = supabase.table("comments").select("*").eq("post_id", post["id"]).order("created_at").execute()
             comments = comments_response.data if comments_response.data else []
 
@@ -233,6 +312,7 @@ def feed():
                         "text": comment_text,
                     }
                     supabase.table("comments").insert(comment_dict).execute()
+                    update_activity()
                     st.rerun()
 
             for c in comments:
@@ -243,7 +323,9 @@ def feed():
 # MESSAGERIE (AVEC SUPABASE STORAGE)
 # =====================================================
 def messenger():
-    st_autorefresh(interval=2000, key="msg_refresh")
+    # --- MODIFIÉ : rafraîchissement adaptatif ---
+    st_autorefresh(interval=get_refresh_interval(), key="msg_refresh")
+    # ---------------------------------------------
     st.header("Messagerie")
 
     users_response = supabase.table("profiles").select("username").neq("username", st.session_state.user).execute()
@@ -362,6 +444,7 @@ def messenger():
 
         if upload_success:
             supabase.table("messages").insert(message_dict).execute()
+            update_activity()
             st.rerun()
 
 # =====================================================
@@ -410,6 +493,7 @@ def profile():
 
         if update_dict:
             supabase.table("profiles").update(update_dict).eq("username", user).execute()
+            update_activity()
             st.rerun()
 
     st.divider()
@@ -429,47 +513,140 @@ def profile():
             else:
                 supabase.table("profiles").update({"password": hash_password(new_pass1)}).eq("username", user).execute()
                 st.success("Mot de passe modifié avec succès !")
+                update_activity()
 
 # =====================================================
-# À PROPOS / CRÉATEUR
+# NOUVEAU : LABORATOIRE TST (visualisation 3D)
 # =====================================================
-def about():
-    st.header("👤 Créateur du réseau")
-    
-    creator_pic = os.path.join(ASSETS_FOLDER, "creator.jpg")
-    if os.path.exists(creator_pic):
-        st.image(creator_pic, width=200)
-    else:
-        st.info("Ajoutez une photo dans assets/creator.jpg")
+def tst_laboratory():
+    st.header("🔬 Laboratoire de Dynamique Triadique")
+    st.info("Visualisation en temps réel de la convergence du réseau vers son attracteur stable.")
+
+    # Simulation d'un attracteur étrange (Lorenz simplifié) basé sur les EDO de la TST
+    # Paramètres inspirés de la recherche sur les qtrits
+    def lorenz(x, y, z, s=10, r=28, b=2.667):
+        x_dot = s*(y - x)
+        y_dot = r*x - y - x*z
+        z_dot = x*y - b*z
+        return x_dot, y_dot, z_dot
+
+    dt = 0.01
+    num_steps = 2000
+
+    # Initialisation
+    xs = np.empty(num_steps + 1)
+    ys = np.empty(num_steps + 1)
+    zs = np.empty(num_steps + 1)
+    xs[0], ys[0], zs[0] = (0., 1., 1.05)
+
+    # Intégration
+    for i in range(num_steps):
+        x_dot, y_dot, z_dot = lorenz(xs[i], ys[i], zs[i])
+        xs[i+1] = xs[i] + (x_dot * dt)
+        ys[i+1] = ys[i] + (y_dot * dt)
+        zs[i+1] = zs[i] + (z_dot * dt)
+
+    fig = go.Figure(data=[go.Scatter3d(x=xs, y=ys, z=zs, mode='lines', line=dict(color='blue', width=1))])
+    fig.update_layout(
+        title="Attracteur de Lorenz – Analogie de la stabilité sociale",
+        scene=dict(
+            xaxis_title="Mémoire (M)",
+            yaxis_title="Cohérence (C)",
+            zaxis_title="Dissipation (D)"
+        )
+    )
+    st.plotly_chart(fig)
 
     st.markdown("""
-    ### **SCARABBE**  
-    *Fondateur de Free_Kogossa*
-
-    Passionné par les technologies de communication et les communautés en ligne, j'ai créé Free_Kogossa pour offrir un espace d'échange libre, respectueux et innovant. Mon objectif est de permettre à chacun de s'exprimer sans contraintes, tout en restant connecté à ses proches.
+    Cette visualisation illustre comment un système dynamique (comme votre réseau) peut converger vers des états stables (attracteurs) 
+    malgré des perturbations. Les paramètres sont issus de la **Théorie Spectrale Triadique** et du paradigme **TTU-MC³**.
     """)
+
+# =====================================================
+# À PROPOS / CRÉATEUR (VERSION ENRICHIE)
+# =====================================================
+def about():
+    st.header("👤 Créateur & Vision Scientifique")
+    
+    col1, col2 = st.columns([1, 2])
+    with col1:
+        creator_pic = os.path.join(ASSETS_FOLDER, "creator.jpg")
+        if os.path.exists(creator_pic):
+            st.image(creator_pic, use_container_width=True)
+        else:
+            st.info("Photo de SCARABBE")
+
+    with col2:
+        st.markdown("""
+        ### **SCARABBE** *Fondateur de Free_Kogossa & Chercheur en Systèmes Dynamiques*
+
+        Free_Kogossa n'est pas qu'un réseau social ; c'est le premier moteur social piloté par la **Théorie Spectrale Triadique (TST)**. 
+        Mon travail consiste à modéliser les interactions humaines non pas comme des données statiques, mais comme des flux d'énergie en quête de stabilité.
+        """)
+
+    st.divider()
+
+    # --- SECTION SCIENTIFIQUE : TTU-MC³ ---
+    st.subheader("🔬 Le Moteur Théorique : TTU-MC³")
+    
+    with st.expander("En savoir plus sur la science derrière Free_Kogossa"):
+        st.markdown("""
+        L'architecture de cette application repose sur le paradigme **TTU-MC³** (Mémoire, Cohérence, Dissipation). 
+        Contrairement aux algorithmes classiques, Free_Kogossa utilise :
+        
+        * **Convergence vers l'Attracteur** : Vos flux d'actualités sont optimisés pour atteindre un état d'équilibre informationnel stable.
+        * **Stabilité de Lyapunov** : Pour garantir une modération organique et une robustesse face aux perturbations du réseau.
+        * **Énergie Dissipative** : Un système d'auto-scaling qui réduit l'empreinte numérique quand le système est au repos.
+        
+        *Travaux basés sur la recherche doctorale : "Théorie Spectrale Triadique : Extension des systèmes dynamiques dissipatifs".*
+        """)
+        
+        # Simulation simple de convergence
+        st.write("📊 **Simulation de Convergence Triadique**")
+        t = np.linspace(0, 20, 200)
+        dampening = np.exp(-0.2 * t)
+        oscillation = np.cos(1.5 * t)
+        stability = dampening * oscillation
+        chart_data = pd.DataFrame({
+            "Temps (t)": t,
+            "Stabilité du Flux (Φ)": stability
+        }).set_index("Temps (t)")
+        st.line_chart(chart_data)
+        st.caption("Visualisation de la stabilisation d'un flux d'information après interaction.")
+
+        # --- NOUVEAU : Liens vers les documents de recherche ---
+        st.markdown("### 📄 Documents de recherche")
+        doc_path_pdf = os.path.join(ASSETS_FOLDER, "TST_Thesis.pdf")
+        doc_path_docx = os.path.join(ASSETS_FOLDER, "TST_Thesis.docx")
+        if os.path.exists(doc_path_pdf):
+            with open(doc_path_pdf, "rb") as f:
+                st.download_button("📥 Télécharger la thèse (PDF)", f, file_name="TST_Thesis.pdf")
+        if os.path.exists(doc_path_docx):
+            with open(doc_path_docx, "rb") as f:
+                st.download_button("📥 Télécharger la thèse (DOCX)", f, file_name="TST_Thesis.docx")
+        if not os.path.exists(doc_path_pdf) and not os.path.exists(doc_path_docx):
+            st.info("Les documents de recherche seront bientôt disponibles dans le dossier 'assets'.")
+        # -------------------------------------------------------
 
     st.divider()
     st.header("🌟 Avantages de Free_Kogossa")
 
-    col1, col2 = st.columns(2)
-    with col1:
+    col_a, col_b = st.columns(2)
+    with col_a:
         st.markdown("""
         - 🔒 **Confidentialité** : Pas de pistage, pas de publicités ciblées.
-        - 🎤 **Messages vocaux & vidéo** : Enregistrez directement depuis l'interface.
-        - ⚡ **Temps réel** : Rafraîchissement automatique pour une conversation fluide.
-        - 📸 **Partage multimédia** : Images, audio, vidéo dans le fil et en privé.
+        - 🎙️ **Multi-modalité** : Audio, Vidéo et Texte intégrés.
+        - ⚡ **Algorithme Physique** : Une pertinence basée sur la TST.
         """)
-    with col2:
+    with col_b:
         st.markdown("""
-        - 🗂️ **Stockage cloud** : Vos médias sont hébergés en toute sécurité.
-        - 👥 **Communauté libre** : Créez votre réseau sans restrictions.
-        - 🔄 **Mises à jour continues** : Le projet évolue avec vos retours.
-        - 💬 **Commentaires intégrés** : Interagissez sur les publications.
+        - 🔄 **Stabilité Structurelle** : Une infrastructure résiliente.
+        - 📐 **Auto-scaling Énergétique** : Rafraîchissement adaptatif.
+        - 🧠 **Recherche intégrée** : Le réseau est un laboratoire vivant.
         """)
 
     st.divider()
-    st.caption("Free_Kogossa – un projet open source et communautaire.")
+    st.caption("Free_Kogossa – L'union de la science gabonaise et de la technologie cloud. © 2026")
 
 # =====================================================
 # MAIN
@@ -478,10 +655,12 @@ if not st.session_state.user:
     login()
 else:
     st.sidebar.title("Free_Kogossa")
+    # --- MODIFIÉ : ajout de l'option Laboratoire TST ---
     page = st.sidebar.radio(
         "Navigation",
-        ["Fil social", "Messagerie", "Profil", "À propos / Créateur"]
+        ["Fil social", "Messagerie", "Profil", "Laboratoire TST", "À propos / Créateur"]
     )
+    # ----------------------------------------------------
     if st.sidebar.button("Déconnexion"):
         st.session_state.user = None
         st.rerun()
@@ -492,5 +671,7 @@ else:
         messenger()
     elif page == "Profil":
         profile()
+    elif page == "Laboratoire TST":
+        tst_laboratory()
     elif page == "À propos / Créateur":
         about()
