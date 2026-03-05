@@ -14,8 +14,10 @@ DATA_FOLDER = "data"
 USERS_FILE = f"{DATA_FOLDER}/users.json"
 POSTS_FILE = f"{DATA_FOLDER}/posts.json"
 MESSAGES_FILE = f"{DATA_FOLDER}/messages.json"
+ASSETS_FOLDER = "assets"
 
 os.makedirs(DATA_FOLDER, exist_ok=True)
+os.makedirs(ASSETS_FOLDER, exist_ok=True)
 
 # =====================================================
 # JSON UTILS
@@ -113,7 +115,7 @@ def banner():
     st.divider()
 
 # =====================================================
-# SOCIAL FEED
+# SOCIAL FEED (avec vidéos)
 # =====================================================
 def feed():
     st_autorefresh(interval=3000, key="feed_refresh")
@@ -121,20 +123,35 @@ def feed():
     st.subheader("Exprime toi")
 
     text = st.text_area("Message")
-    img = st.file_uploader("Image", type=["png", "jpg", "jpeg"])
+
+    col_img, col_vid = st.columns(2)
+    with col_img:
+        img = st.file_uploader("Image", type=["png", "jpg", "jpeg"], key="feed_img")
+    with col_vid:
+        video = st.file_uploader("Vidéo", type=["mp4", "mov", "avi", "mkv"], key="feed_video")
 
     if st.button("Publier"):
         post_id = str(len(posts) + 1)
-        img_path = ""
-        if img:
-            img_path = f"{DATA_FOLDER}/post_{post_id}.png"
-            with open(img_path, "wb") as f:
+        media_path = ""
+        media_type = None
+
+        if img is not None:
+            media_path = f"{DATA_FOLDER}/post_{post_id}.png"
+            with open(media_path, "wb") as f:
                 f.write(img.getbuffer())
+            media_type = "image"
+        elif video is not None:
+            ext = os.path.splitext(video.name)[1]
+            media_path = f"{DATA_FOLDER}/post_{post_id}{ext}"
+            with open(media_path, "wb") as f:
+                f.write(video.getbuffer())
+            media_type = "video"
 
         posts[post_id] = {
             "user": st.session_state.user,
             "text": text,
-            "image": img_path,
+            "media_path": media_path,
+            "media_type": media_type,
             "time": datetime.now().timestamp(),
             "comments": []
         }
@@ -147,8 +164,15 @@ def feed():
     for pid, post in ordered:
         st.subheader(post["user"])
         st.write(post["text"])
-        if post["image"] and os.path.exists(post["image"]):
-            st.image(post["image"])
+
+        media_path = post.get("media_path", "")
+        media_type = post.get("media_type")
+        if media_path and os.path.exists(media_path):
+            if media_type == "image":
+                st.image(media_path)
+            elif media_type == "video":
+                st.video(media_path)
+
         st.caption(datetime.fromtimestamp(post["time"]))
 
         comment = st.text_input("Commenter", key=f"c{pid}")
@@ -162,7 +186,7 @@ def feed():
         st.divider()
 
 # =====================================================
-# MESSENGER
+# MESSENGER (avec correction enregistrement vocal)
 # =====================================================
 def messenger():
     st_autorefresh(interval=2000, key="msg_refresh")
@@ -208,7 +232,7 @@ def messenger():
         video_file = st.file_uploader("🎬 Vidéo (fichier)", type=["mp4", "mov", "avi"], key="msg_video")
     with col4:
         st.write("🎙️ Enregistrement vocal")
-        audio_bytes = mic_recorder(
+        recorder_output = mic_recorder(
             start_prompt="Démarrer",
             stop_prompt="Arrêter",
             just_once=False,
@@ -216,41 +240,62 @@ def messenger():
         )
 
     if st.button("Envoyer message", type="primary"):
-        # 1. Enregistrement vocal
+        # Traitement de l'enregistrement vocal
+        audio_bytes = None
+        if recorder_output is not None:
+            if isinstance(recorder_output, dict):
+                audio_bytes = recorder_output.get("bytes")
+            else:
+                audio_bytes = recorder_output
+
         if audio_bytes is not None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             audio_path = f"{DATA_FOLDER}/voice_{st.session_state.user}_{timestamp}.wav"
             with open(audio_path, "wb") as f:
                 f.write(audio_bytes)
-            messages[conv_id].append({"sender": st.session_state.user, "audio_path": audio_path, "time": datetime.now().timestamp()})
+            messages[conv_id].append({
+                "sender": st.session_state.user,
+                "audio_path": audio_path,
+                "time": datetime.now().timestamp()
+            })
             save_json(MESSAGES_FILE, messages)
             st.rerun()
 
-        # 2. Upload audio
         elif audio_file is not None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             audio_path = f"{DATA_FOLDER}/audio_{st.session_state.user}_{timestamp}.audio"
             with open(audio_path, "wb") as f:
                 f.write(audio_file.getbuffer())
-            messages[conv_id].append({"sender": st.session_state.user, "audio_path": audio_path, "time": datetime.now().timestamp()})
+            messages[conv_id].append({
+                "sender": st.session_state.user,
+                "audio_path": audio_path,
+                "time": datetime.now().timestamp()
+            })
             save_json(MESSAGES_FILE, messages)
             st.rerun()
 
-        # 3. Upload vidéo
         elif video_file is not None:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             video_path = f"{DATA_FOLDER}/video_{st.session_state.user}_{timestamp}.video"
             with open(video_path, "wb") as f:
                 f.write(video_file.getbuffer())
-            messages[conv_id].append({"sender": st.session_state.user, "video_path": video_path, "time": datetime.now().timestamp()})
+            messages[conv_id].append({
+                "sender": st.session_state.user,
+                "video_path": video_path,
+                "time": datetime.now().timestamp()
+            })
             save_json(MESSAGES_FILE, messages)
             st.rerun()
 
-        # 4. Texte
         elif text_msg.strip() != "":
-            messages[conv_id].append({"sender": st.session_state.user, "text": text_msg, "time": datetime.now().timestamp()})
+            messages[conv_id].append({
+                "sender": st.session_state.user,
+                "text": text_msg,
+                "time": datetime.now().timestamp()
+            })
             save_json(MESSAGES_FILE, messages)
             st.rerun()
+
         else:
             st.warning("Écris un message, enregistre un audio ou ajoute un fichier.")
 
@@ -286,13 +331,57 @@ def profile():
         st.rerun()
 
 # =====================================================
+# À PROPOS / CRÉATEUR
+# =====================================================
+def about():
+    st.header("👤 Créateur du réseau")
+    
+    creator_pic = os.path.join(ASSETS_FOLDER, "creator.jpg")
+    if os.path.exists(creator_pic):
+        st.image(creator_pic, width=200)
+    else:
+        st.info("Ajoutez une photo dans assets/creator.jpg")
+
+    st.markdown("""
+    ### **Jean Kogossa**  
+    *Fondateur de Free_Kogossa*
+
+    Passionné par les technologies de communication et les communautés en ligne, j'ai créé Free_Kogossa pour offrir un espace d'échange libre, respectueux et innovant. Mon objectif est de permettre à chacun de s'exprimer sans contraintes, tout en restant connecté à ses proches.
+    """)
+
+    st.divider()
+    st.header("🌟 Avantages de Free_Kogossa")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("""
+        - 🔒 **Confidentialité** : Pas de pistage, pas de publicités ciblées.
+        - 🎤 **Messages vocaux & vidéo** : Enregistrez directement depuis l'interface.
+        - ⚡ **Temps réel** : Rafraîchissement automatique pour une conversation fluide.
+        - 📸 **Partage multimédia** : Images, audio, vidéo dans le fil et en privé.
+        """)
+    with col2:
+        st.markdown("""
+        - 🗂️ **Stockage local** : Vos données restent sur votre serveur.
+        - 👥 **Communauté libre** : Créez votre réseau sans restrictions.
+        - 🔄 **Mises à jour continues** : Le projet évolue avec vos retours.
+        - 💬 **Commentaires intégrés** : Interagissez sur les publications.
+        """)
+
+    st.divider()
+    st.caption("Free_Kogossa – un projet open source et communautaire.")
+
+# =====================================================
 # MAIN
 # =====================================================
 if not st.session_state.user:
     login()
 else:
     st.sidebar.title("Free_Kogossa")
-    page = st.sidebar.radio("Navigation", ["Fil social", "Messagerie", "Profil"])
+    page = st.sidebar.radio(
+        "Navigation",
+        ["Fil social", "Messagerie", "Profil", "À propos / Créateur"]
+    )
     if st.sidebar.button("Déconnexion"):
         st.session_state.user = None
         st.rerun()
@@ -303,3 +392,5 @@ else:
         messenger()
     elif page == "Profil":
         profile()
+    elif page == "À propos / Créateur":
+        about()
