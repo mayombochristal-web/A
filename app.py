@@ -1,7 +1,7 @@
 import streamlit as st
 import os
 import hashlib
-from datetime import datetime
+from datetime import datetime, timedelta
 from supabase import create_client, Client
 from streamlit_autorefresh import st_autorefresh
 from streamlit_mic_recorder import mic_recorder
@@ -79,6 +79,73 @@ def get_refresh_interval():
 # ----------------------------------------------------
 
 # =====================================================
+# FONCTIONS DE GESTION DU WALLET ET FORFAITS
+# =====================================================
+
+def get_wallet(username):
+    """Retourne le solde KC de l'utilisateur."""
+    resp = supabase.table("wallets").select("kongo_balance").eq("username", username).execute()
+    if resp.data:
+        return resp.data[0]["kongo_balance"]
+    return 0.0
+
+def update_wallet(username, amount, operation="add"):
+    """Ajoute ou retire des KC du wallet. operation : 'add' ou 'subtract'."""
+    wallet = supabase.table("wallets").select("kongo_balance").eq("username", username).execute()
+    if not wallet.data:
+        return False
+    current = wallet.data[0]["kongo_balance"]
+    new_balance = current + amount if operation == "add" else current - amount
+    if new_balance < 0:
+        return False
+    supabase.table("wallets").update({"kongo_balance": new_balance}).eq("username", username).execute()
+    return True
+
+def get_user_plan(username):
+    """Retourne le forfait actuel de l'utilisateur."""
+    resp = supabase.table("subscriptions").select("plan_type", "expires_at", "is_active").eq("username", username).execute()
+    if resp.data:
+        return resp.data[0]
+    return {"plan_type": "Gratuit", "expires_at": None, "is_active": True}
+
+def activate_plan(username, plan_type, duration_days=30):
+    """Active un forfait pour l'utilisateur (met à jour subscriptions et tst_params)."""
+    expires_at = datetime.now() + timedelta(days=duration_days)
+    data = {
+        "username": username,
+        "plan_type": plan_type,
+        "activated_at": datetime.now().isoformat(),
+        "expires_at": expires_at.isoformat(),
+        "is_active": True
+    }
+    supabase.table("subscriptions").delete().eq("username", username).execute()
+    supabase.table("subscriptions").insert(data).execute()
+
+    params = {}
+    if plan_type == "Gratuit":
+        params = {"phi_m": 1.0, "phi_c": 1.0, "phi_d": 1.5}
+    elif plan_type == "Pro_Memoire":
+        params = {"phi_m": 3.0, "phi_c": 1.0, "phi_d": 0.1}
+    elif plan_type == "Attracteur_Global":
+        params = {"phi_m": 2.0, "phi_c": 10.0, "phi_d": 1.0}
+
+    supabase.table("tst_params").update(params).eq("username", username).execute()
+
+def credit_creator(amount):
+    """Crédite le wallet du créateur (SCARABBE) du montant spécifié."""
+    update_wallet("SCARABBE", amount, "add")
+
+# --- NOUVEAU : S'assurer que SCARABBE a 1M KC ---
+def ensure_scarabbe_wallet():
+    """Si l'utilisateur est SCARABBE et que son wallet est à 0, on lui donne 1M KC."""
+    if st.session_state.user == "SCARABBE":
+        current = get_wallet("SCARABBE")
+        if current == 0.0:
+            update_wallet("SCARABBE", 1_000_000, "add")
+            st.sidebar.success("🎉 Bienvenue Créateur ! 1 000 000 KC ont été crédités sur votre wallet.")
+# ------------------------------------------------
+
+# =====================================================
 # LOGIN / REGISTER (AVEC SUPABASE)
 # =====================================================
 def login():
@@ -97,6 +164,7 @@ def login():
                 if user_data["password"] == hash_password(password):
                     st.session_state.user = username
                     update_activity()
+                    ensure_scarabbe_wallet()   # ICI : on donne 1M à SCARABBE si nécessaire
                     st.rerun()
                 else:
                     st.error("Mot de passe incorrect")
@@ -170,24 +238,25 @@ def banner():
 # =====================================================
 # NOUVEAU : CŒUR TST (calcul de stabilité)
 # =====================================================
-def calculate_stability(likes, comments, dissipation_rate=0.1):
+def calculate_stability(likes, comments, phi_m=1.0, phi_c=1.0, phi_d=1.0):
     """
-    Applique la TTU-MC3 :
-    M (Mémoire) = likes cumulés
-    C (Cohérence) = commentaires actifs
-    D (Dissipation) = perte d'intérêt temporelle
+    Applique la TTU-MC3 avec coefficients personnalisables.
     """
-    # Équation simplifiée issue des documents de recherche
-    # dPhi/dt = Sigma(Interaction) - Dissipation
-    stability = (likes * 0.6 + comments * 0.4) * np.exp(-dissipation_rate)
+    stability = (likes * phi_m * 0.6 + comments * phi_c * 0.4) * np.exp(-phi_d)
     return round(stability, 2)
+
+def get_user_params(username):
+    """Récupère les paramètres TST de l'utilisateur."""
+    resp = supabase.table("tst_params").select("phi_m", "phi_c", "phi_d").eq("username", username).execute()
+    if resp.data:
+        return resp.data[0]
+    return {"phi_m": 1.0, "phi_c": 1.0, "phi_d": 1.0}
 
 # =====================================================
 # NOUVEAU : Gestion des likes
 # =====================================================
 def like_post(post_id, username):
     """Ajoute un like pour un post (table 'likes')."""
-    # Vérifie si l'utilisateur a déjà liké
     existing = supabase.table("likes").select("*").eq("post_id", post_id).eq("username", username).execute()
     if not existing.data:
         supabase.table("likes").insert({"post_id": post_id, "username": username}).execute()
@@ -202,9 +271,7 @@ def get_likes_count(post_id):
 # FIL SOCIAL (AVEC SUPABASE STORAGE)
 # =====================================================
 def feed():
-    # --- MODIFIÉ : rafraîchissement adaptatif ---
     st_autorefresh(interval=get_refresh_interval(), key="feed_refresh")
-    # ---------------------------------------------
     banner()
     st.subheader("Exprime toi")
 
@@ -215,17 +282,12 @@ def feed():
     with col_vid:
         video = st.file_uploader("Vidéo", type=["mp4", "mov", "avi", "mkv"], key="feed_video")
 
-    # -------------------------------------------------
-    # VERIFICATION TAILLE FICHIERS (MAX 50MB SUPABASE)
-    # -------------------------------------------------
     if img is not None and img.size > 50 * 1024 * 1024:
         st.error("Cette image est trop lourde (max 50 Mo)")
         st.stop()
-
     if video is not None and video.size > 50 * 1024 * 1024:
         st.error("Cette vidéo dépasse la limite de 50 Mo de Supabase")
         st.stop()
-    # -------------------------------------------------
 
     if st.button("Publier"):
         media_url = ""
@@ -279,17 +341,19 @@ def feed():
             created_at = datetime.fromisoformat(post["created_at"].replace("Z", "+00:00"))
             st.caption(created_at.strftime("%Y-%m-%d %H:%M"))
 
-            # --- NOUVEAU : Affichage de la stabilité TST ---
+            post_author = post["username"]
+            author_params = get_user_params(post_author)
             likes_count = get_likes_count(post["id"])
             comments_response = supabase.table("comments").select("*", count="exact").eq("post_id", post["id"]).execute()
             comments_count = comments_response.count if hasattr(comments_response, 'count') else len(comments_response.data)
-            stability = calculate_stability(likes_count, comments_count)
+            stability = calculate_stability(likes_count, comments_count,
+                                            phi_m=author_params["phi_m"],
+                                            phi_c=author_params["phi_c"],
+                                            phi_d=author_params["phi_d"])
             st.markdown(f"**Indice de Stabilité (TST) :** `{stability}`")
             if stability > 5.0:
                 st.success("🔥 Ce post est un Attracteur Stable")
-            # ------------------------------------------------
 
-            # --- NOUVEAU : Bouton J'aime ---
             col1, col2 = st.columns([1, 10])
             with col1:
                 if st.button("❤️", key=f"like_{post['id']}"):
@@ -297,7 +361,6 @@ def feed():
                     st.rerun()
             with col2:
                 st.write(f"**{likes_count}** likes")
-            # --------------------------------
 
             comments_response = supabase.table("comments").select("*").eq("post_id", post["id"]).order("created_at").execute()
             comments = comments_response.data if comments_response.data else []
@@ -323,9 +386,7 @@ def feed():
 # MESSAGERIE (AVEC SUPABASE STORAGE)
 # =====================================================
 def messenger():
-    # --- MODIFIÉ : rafraîchissement adaptatif ---
     st_autorefresh(interval=get_refresh_interval(), key="msg_refresh")
-    # ---------------------------------------------
     st.header("Messagerie")
 
     users_response = supabase.table("profiles").select("username").neq("username", st.session_state.user).execute()
@@ -470,6 +531,15 @@ def profile():
     st.write("Localisation :", profile_data.get("location", ""))
     st.caption("Compte créé : " + profile_data.get("created_at", ""))
 
+    kc_balance = get_wallet(user)
+    st.metric("💰 Kongo Coins", f"{kc_balance:.2f} KC")
+
+    plan_info = get_user_plan(user)
+    st.info(f"Forfait actuel : **{plan_info['plan_type']}**")
+    if plan_info['expires_at']:
+        expires = datetime.fromisoformat(plan_info['expires_at'].replace("Z", "+00:00"))
+        st.caption(f"Expire le : {expires.strftime('%Y-%m-%d %H:%M')}")
+
     st.subheader("Modifier les informations")
     new_bio = st.text_area("Bio", value=profile_data.get("bio", ""))
     new_loc = st.text_input("Localisation", value=profile_data.get("location", ""))
@@ -516,14 +586,125 @@ def profile():
                 update_activity()
 
 # =====================================================
-# NOUVEAU : LABORATOIRE TST (visualisation 3D)
+# BOUTIQUE / FORFAITS
+# =====================================================
+def shop():
+    st.header("🛒 Boutique des Forfaits Physiques")
+    user = st.session_state.user
+    balance = get_wallet(user)
+
+    st.metric("Votre solde", f"{balance:.2f} KC")
+
+    st.subheader("Améliorez votre présence avec les forfaits TTU‑MC³")
+    st.markdown("""
+    - **Gratuit** : Dissipation rapide, visibilité standard. (0 KC)
+    - **Pro_Memoire** : Vos posts durent plus longtemps (faible dissipation). (50 KC / mois)
+    - **Attracteur_Global** : Devenez le centre d'attraction du réseau (visibilité ×10). (100 KC / mois)
+    """)
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if st.button("Activer Gratuit (0 KC)"):
+            current = get_user_plan(user)
+            if current['plan_type'] == 'Gratuit':
+                st.warning("Vous êtes déjà en forfait Gratuit.")
+            else:
+                activate_plan(user, "Gratuit", 30)
+                st.success("Forfait Gratuit activé.")
+                st.rerun()
+    with col2:
+        if st.button("Activer Pro_Memoire (50 KC)"):
+            if balance >= 50:
+                if update_wallet(user, 50, "subtract"):
+                    credit_creator(50)
+                    activate_plan(user, "Pro_Memoire", 30)
+                    st.success("Forfait Pro_Memoire activé !")
+                    st.rerun()
+                else:
+                    st.error("Erreur lors du paiement.")
+            else:
+                st.error("Solde insuffisant.")
+    with col3:
+        if st.button("Activer Attracteur_Global (100 KC)"):
+            if balance >= 100:
+                if update_wallet(user, 100, "subtract"):
+                    credit_creator(100)
+                    activate_plan(user, "Attracteur_Global", 30)
+                    st.success("Forfait Attracteur_Global activé !")
+                    st.rerun()
+                else:
+                    st.error("Erreur lors du paiement.")
+            else:
+                st.error("Solde insuffisant.")
+
+    st.divider()
+    st.subheader("Acheter des Kongo Coins")
+    st.markdown("(Simulation – à connecter à un vrai système de paiement)")
+    amount = st.number_input("Montant de KC à ajouter", min_value=10, step=10, value=50)
+    if st.button("Ajouter KC"):
+        update_wallet(user, amount, "add")
+        st.success(f"{amount} KC ajoutés à votre wallet !")
+        st.rerun()
+
+# =====================================================
+# ADMIN PANEL (RÉSERVÉ À SCARABBE)
+# =====================================================
+def admin_panel():
+    if st.session_state.user != "SCARABBE":
+        st.error("Accès non autorisé.")
+        return
+
+    st.title("🛡️ Administration Centrale TTU-MC³")
+    st.success("Accès Maître des Attracteurs validé.")
+
+    users_resp = supabase.table("profiles").select("username").execute()
+    users_list = [u["username"] for u in users_resp.data] if users_resp.data else []
+
+    target_user = st.selectbox("Choisir un utilisateur à configurer", users_list)
+
+    params = get_user_params(target_user)
+    sub_info = get_user_plan(target_user)
+
+    st.subheader(f"Réglages Physiques pour @{target_user}")
+    st.write(f"Forfait actuel : {sub_info['plan_type']}")
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        new_phi_m = st.slider("Coefficient Mémoire (Φm)", 0.1, 5.0, params["phi_m"])
+    with col2:
+        new_phi_c = st.slider("Cohérence / Visibilité (Φc)", 0.1, 10.0, params["phi_c"])
+    with col3:
+        new_phi_d = st.slider("Taux de Dissipation (Φd)", 0.01, 2.0, params["phi_d"])
+
+    new_plan = st.selectbox("Forfait", ["Gratuit", "Pro_Memoire", "Attracteur_Global"],
+                            index=["Gratuit", "Pro_Memoire", "Attracteur_Global"].index(sub_info['plan_type']) if sub_info['plan_type'] in ["Gratuit", "Pro_Memoire", "Attracteur_Global"] else 0)
+
+    if st.button("Appliquer les modifications TTU-MC³"):
+        supabase.table("tst_params").update({
+            "phi_m": new_phi_m,
+            "phi_c": new_phi_c,
+            "phi_d": new_phi_d
+        }).eq("username", target_user).execute()
+
+        if new_plan != sub_info['plan_type']:
+            supabase.table("subscriptions").delete().eq("username", target_user).execute()
+            supabase.table("subscriptions").insert({
+                "username": target_user,
+                "plan_type": new_plan,
+                "activated_at": datetime.now().isoformat(),
+                "expires_at": (datetime.now() + timedelta(days=30)).isoformat(),
+                "is_active": True
+            }).execute()
+
+        st.success("Système dynamique mis à jour avec succès.")
+
+# =====================================================
+# LABORATOIRE TST (visualisation 3D)
 # =====================================================
 def tst_laboratory():
     st.header("🔬 Laboratoire de Dynamique Triadique")
     st.info("Visualisation en temps réel de la convergence du réseau vers son attracteur stable.")
 
-    # Simulation d'un attracteur étrange (Lorenz simplifié) basé sur les EDO de la TST
-    # Paramètres inspirés de la recherche sur les qtrits
     def lorenz(x, y, z, s=10, r=28, b=2.667):
         x_dot = s*(y - x)
         y_dot = r*x - y - x*z
@@ -532,14 +713,11 @@ def tst_laboratory():
 
     dt = 0.01
     num_steps = 2000
-
-    # Initialisation
     xs = np.empty(num_steps + 1)
     ys = np.empty(num_steps + 1)
     zs = np.empty(num_steps + 1)
     xs[0], ys[0], zs[0] = (0., 1., 1.05)
 
-    # Intégration
     for i in range(num_steps):
         x_dot, y_dot, z_dot = lorenz(xs[i], ys[i], zs[i])
         xs[i+1] = xs[i] + (x_dot * dt)
@@ -567,7 +745,7 @@ def tst_laboratory():
 # =====================================================
 def about():
     st.header("👤 Créateur & Vision Scientifique")
-    
+
     col1, col2 = st.columns([1, 2])
     with col1:
         creator_pic = os.path.join(ASSETS_FOLDER, "creator.jpg")
@@ -586,22 +764,20 @@ def about():
 
     st.divider()
 
-    # --- SECTION SCIENTIFIQUE : TTU-MC³ ---
     st.subheader("🔬 Le Moteur Théorique : TTU-MC³")
-    
+
     with st.expander("En savoir plus sur la science derrière Free_Kogossa"):
         st.markdown("""
         L'architecture de cette application repose sur le paradigme **TTU-MC³** (Mémoire, Cohérence, Dissipation). 
         Contrairement aux algorithmes classiques, Free_Kogossa utilise :
-        
+
         * **Convergence vers l'Attracteur** : Vos flux d'actualités sont optimisés pour atteindre un état d'équilibre informationnel stable.
         * **Stabilité de Lyapunov** : Pour garantir une modération organique et une robustesse face aux perturbations du réseau.
         * **Énergie Dissipative** : Un système d'auto-scaling qui réduit l'empreinte numérique quand le système est au repos.
-        
+
         *Travaux basés sur la recherche doctorale : "Théorie Spectrale Triadique : Extension des systèmes dynamiques dissipatifs".*
         """)
-        
-        # Simulation simple de convergence
+
         st.write("📊 **Simulation de Convergence Triadique**")
         t = np.linspace(0, 20, 200)
         dampening = np.exp(-0.2 * t)
@@ -614,7 +790,6 @@ def about():
         st.line_chart(chart_data)
         st.caption("Visualisation de la stabilisation d'un flux d'information après interaction.")
 
-        # --- NOUVEAU : Liens vers les documents de recherche ---
         st.markdown("### 📄 Documents de recherche")
         doc_path_pdf = os.path.join(ASSETS_FOLDER, "TST_Thesis.pdf")
         doc_path_docx = os.path.join(ASSETS_FOLDER, "TST_Thesis.docx")
@@ -626,7 +801,6 @@ def about():
                 st.download_button("📥 Télécharger la thèse (DOCX)", f, file_name="TST_Thesis.docx")
         if not os.path.exists(doc_path_pdf) and not os.path.exists(doc_path_docx):
             st.info("Les documents de recherche seront bientôt disponibles dans le dossier 'assets'.")
-        # -------------------------------------------------------
 
     st.divider()
     st.header("🌟 Avantages de Free_Kogossa")
@@ -655,12 +829,15 @@ if not st.session_state.user:
     login()
 else:
     st.sidebar.title("Free_Kogossa")
-    # --- MODIFIÉ : ajout de l'option Laboratoire TST ---
-    page = st.sidebar.radio(
-        "Navigation",
-        ["Fil social", "Messagerie", "Profil", "Laboratoire TST", "À propos / Créateur"]
-    )
-    # ----------------------------------------------------
+    kc_balance = get_wallet(st.session_state.user)
+    st.sidebar.metric("💰 Kongo Coins", f"{kc_balance:.2f} KC")
+
+    menu_options = ["Fil social", "Messagerie", "Profil", "Boutique", "Laboratoire TST", "À propos / Créateur"]
+    if st.session_state.user == "SCARABBE":
+        menu_options.append("Administration")
+
+    page = st.sidebar.radio("Navigation", menu_options)
+
     if st.sidebar.button("Déconnexion"):
         st.session_state.user = None
         st.rerun()
@@ -671,7 +848,11 @@ else:
         messenger()
     elif page == "Profil":
         profile()
+    elif page == "Boutique":
+        shop()
     elif page == "Laboratoire TST":
         tst_laboratory()
     elif page == "À propos / Créateur":
         about()
+    elif page == "Administration":
+        admin_panel()
