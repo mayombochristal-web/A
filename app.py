@@ -136,9 +136,9 @@ def activate_plan(username, plan_type, duration_days=30):
     if plan_type == "Gratuit":
         params = {"phi_m": 1.0, "phi_c": 1.0, "phi_d": 1.5}
     elif plan_type == "Pro_Memoire":
-        params = {"phi_m": 3.0, "phi_c": 1.0, "phi_d": 0.1}
+        params = {"phi_m": 5.0, "phi_c": 1.5, "phi_d": 0.1}
     elif plan_type == "Attracteur_Global":
-        params = {"phi_m": 2.0, "phi_c": 10.0, "phi_d": 1.0}
+        params = {"phi_m": 3.0, "phi_c": 15.0, "phi_d": 0.8}
 
     supabase.table("tst_params").update(params).eq("username", clean_name).execute()
 
@@ -264,16 +264,27 @@ def get_user_params(username):
     return {"phi_m": 1.0, "phi_c": 1.0, "phi_d": 1.0}
 
 # =====================================================
-# GESTION DES LIKES (AVEC MINAGE)
+# GESTION DES LIKES (AVEC MINAGE ET ÉVOLUTION TST)
 # =====================================================
 def like_post(post_id, username):
     existing = supabase.table("likes").select("*").eq("post_id", post_id).eq("username", username).execute()
     if not existing.data:
+        # 1. Enregistre le like
         supabase.table("likes").insert({"post_id": post_id, "username": username}).execute()
+
+        # 2. Récupère l'auteur du post
         post_author_resp = supabase.table("posts").select("username").eq("id", post_id).execute()
         if post_author_resp.data:
             author = post_author_resp.data[0]["username"]
+
+            # 3. Récompense financière (minage) : 0.1 KC pour l'auteur
             update_wallet(author, 0.1, "add")
+
+            # 4. Évolution TST : chaque like augmente légèrement la mémoire (phi_m) de l'auteur
+            current_params = get_user_params(author)
+            new_phi_m = current_params['phi_m'] + 0.01
+            supabase.table("tst_params").update({"phi_m": new_phi_m}).eq("username", author.upper()).execute()
+
         update_activity()
 
 def get_likes_count(post_id):
@@ -608,61 +619,47 @@ def profile():
                 update_activity()
 
 # =====================================================
-# BOUTIQUE / FORFAITS
+# BOUTIQUE / FORFAITS (NOUVELLE VERSION)
 # =====================================================
 def shop():
-    st.header("🛒 Boutique des Forfaits Physiques")
+    st.header("💎 Boutique de Stabilité (Forfaits TST)")
     user = st.session_state.user
     balance = get_wallet(user)
-    st.metric("Votre solde", f"{balance:.2f} KC")
+    st.metric("Votre Trésorerie", f"{balance:.2f} KC")
 
-    st.subheader("Forfaits TTU‑MC³")
-    st.markdown("""
-    - **Gratuit** : Dissipation rapide, visibilité standard. (0 KC)
-    - **Pro_Memoire** : Vos posts durent plus longtemps (50 KC / mois)
-    - **Attracteur_Global** : Devenez le centre d'attraction (100 KC / mois)
-    """)
+    plans = {
+        "Gratuit": {"price": 0, "phi_m": 1.0, "phi_c": 1.0, "phi_d": 1.5, "desc": "Visibilité standard"},
+        "Pro_Memoire": {"price": 500, "phi_m": 5.0, "phi_c": 1.5, "phi_d": 0.1, "desc": "Tes posts restent visibles plus longtemps (Faible Déclin)"},
+        "Attracteur_Global": {"price": 2500, "phi_m": 3.0, "phi_c": 15.0, "phi_d": 0.8, "desc": "Priorité maximale dans le fil d'actualité (Forte Cohérence)"}
+    }
 
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        if st.button("Activer Gratuit (0 KC)"):
-            if get_user_plan(user)['plan_type'] == 'Gratuit':
-                st.warning("Vous êtes déjà en forfait Gratuit.")
-            else:
-                activate_plan(user, "Gratuit", 30)
-                st.success("Forfait Gratuit activé.")
-                st.rerun()
-    with col2:
-        if st.button("Activer Pro_Memoire (50 KC)"):
-            if balance >= 50:
-                if update_wallet(user, 50, "subtract"):
-                    if credit_creator(50):
-                        activate_plan(user, "Pro_Memoire", 30)
-                        st.success("Forfait Pro_Memoire activé ! Votre solde a été mis à jour.")
+    cols = st.columns(3)
+    for i, (name, info) in enumerate(plans.items()):
+        with cols[i]:
+            st.subheader(name)
+            st.write(info["desc"])
+            st.code(f"Prix: {info['price']} KC")
+
+            if st.button(f"Activer {name}", key=f"buy_{name}"):
+                if balance >= info["price"]:
+                    # --- ACTION 1: On retire l'argent ---
+                    if update_wallet(user, info["price"], "subtract"):
+                        # --- ACTION 2: On active le plan et les paramètres TST ---
+                        activate_plan(user, name)
+                        # --- ACTION 3: On crédite le créateur (Taxe SCARABBE 10%) ---
+                        taxe = info["price"] * 0.1
+                        if taxe > 0:
+                            if not credit_creator(taxe):
+                                # Si le crédit échoue, on rembourse l'utilisateur
+                                update_wallet(user, info["price"], "add")
+                                st.error("Erreur lors du crédit au créateur. Transaction annulée.")
+                                st.stop()
+                        st.success(f"Plan {name} activé ! Vos paramètres TST ont été mis à jour.")
                         st.rerun()
                     else:
-                        # Si le crédit créateur échoue, on rembourse l'utilisateur
-                        update_wallet(user, 50, "add")
-                        st.error("Erreur lors du crédit au créateur. Transaction annulée.")
+                        st.error("Erreur lors du débit de votre wallet.")
                 else:
-                    st.error("Erreur lors du débit de votre wallet.")
-            else:
-                st.error("Solde insuffisant.")
-    with col3:
-        if st.button("Activer Attracteur_Global (100 KC)"):
-            if balance >= 100:
-                if update_wallet(user, 100, "subtract"):
-                    if credit_creator(100):
-                        activate_plan(user, "Attracteur_Global", 30)
-                        st.success("Forfait Attracteur_Global activé ! Votre solde a été mis à jour.")
-                        st.rerun()
-                    else:
-                        update_wallet(user, 100, "add")
-                        st.error("Erreur lors du crédit au créateur. Transaction annulée.")
-                else:
-                    st.error("Erreur lors du débit de votre wallet.")
-            else:
-                st.error("Solde insuffisant.")
+                    st.error("Solde insuffisant pour ce niveau de stabilité.")
 
     st.divider()
     st.subheader("Acheter des Kongo Coins (simulation)")
