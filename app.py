@@ -83,7 +83,9 @@ def get_refresh_interval():
 # =====================================================
 
 def get_wallet(username):
-    """Retourne le solde KC de l'utilisateur."""
+    if st.button("🔄 Rafraîchir le solde"):
+    balance = get_wallet(st.session_state.user)
+    st.experimental_rerun()
     resp = supabase.table("wallets").select("kongo_balance").eq("username", username).execute()
     if resp.data:
         return resp.data[0]["kongo_balance"]
