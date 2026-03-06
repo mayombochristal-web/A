@@ -135,11 +135,19 @@ def credit_creator(amount):
     """Crédite le wallet du créateur (SCARABBE) du montant spécifié."""
     update_wallet("SCARABBE", amount, "add")
 
-# --- S'assurer que SCARABBE a 1M KC ---
+# --- CORRIGÉ : S'assurer que SCARABBE a 1M KC (avec création du wallet si nécessaire) ---
 def ensure_scarabbe_wallet():
-    """Si l'utilisateur est SCARABBE et que son wallet est à 0, on lui donne 1M KC."""
+    """Si l'utilisateur est SCARABBE, on vérifie que son wallet existe et on lui donne 1M KC si vide."""
     if st.session_state.user == "SCARABBE":
-        current = get_wallet("SCARABBE")
+        # Vérifier si le wallet existe
+        wallet = supabase.table("wallets").select("kongo_balance").eq("username", "SCARABBE").execute()
+        if not wallet.data:
+            # Créer le wallet
+            supabase.table("wallets").insert({"username": "SCARABBE", "kongo_balance": 0}).execute()
+            current = 0.0
+        else:
+            current = wallet.data[0]["kongo_balance"]
+        
         if current == 0.0:
             update_wallet("SCARABBE", 1_000_000, "add")
             st.sidebar.success("🎉 Bienvenue Créateur ! 1 000 000 KC ont été crédités sur votre wallet.")
@@ -680,7 +688,7 @@ def shop():
         st.rerun()
 
 # =====================================================
-# MARKETPLACE TRIADIQUE
+# MARKETPLACE TRIADIQUE (CORRIGÉE)
 # =====================================================
 def marketplace():
     st.header("🏪 Marketplace Free_Kogossa")
@@ -709,13 +717,18 @@ def marketplace():
 
     st.divider()
 
-    # --- AFFICHAGE TRIÉ PAR TST ---
-    # On récupère les annonces jointes aux paramètres TST des vendeurs
-    resp = supabase.table("marketplace_listings").select("*, tst_params(phi_c)").eq("is_active", True).execute()
+    # --- AFFICHAGE TRIÉ PAR TST (corrigé : pas de jointure directe) ---
+    # Récupérer toutes les annonces actives
+    resp = supabase.table("marketplace_listings").select("*").eq("is_active", True).execute()
     listings = resp.data if resp.data else []
 
-    # Tri : Priorité à ceux qui ont payé pour la Cohérence (phi_c)
-    listings.sort(key=lambda x: x['tst_params']['phi_c'] if x['tst_params'] else 1.0, reverse=True)
+    # Enrichir chaque annonce avec le phi_c du vendeur
+    for item in listings:
+        params = get_user_params(item['username'])
+        item['phi_c'] = params['phi_c']
+
+    # Tri par phi_c décroissant
+    listings.sort(key=lambda x: x['phi_c'], reverse=True)
 
     for item in listings:
         with st.container():
@@ -723,8 +736,7 @@ def marketplace():
             with col_info:
                 st.subheader(item['title'])
                 st.write(item['description'])
-                phi = item['tst_params']['phi_c'] if item['tst_params'] else 1.0
-                st.caption(f"Vendeur : @{item['username']} | Visibilité : {phi}x")
+                st.caption(f"Vendeur : @{item['username']} | Visibilité : {item['phi_c']}x")
             with col_buy:
                 st.markdown(f"### {item['price_kc']} KC")
                 if st.button("Acheter", key=f"buy_{item['id']}"):
