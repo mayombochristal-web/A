@@ -78,42 +78,43 @@ def get_refresh_interval():
 # =====================================================
 
 def get_wallet(username):
-    """Retourne le solde KC de l'utilisateur."""
-    resp = supabase.table("wallets").select("kongo_balance").eq("username", username).execute()
-    if resp.data:
+    """Récupère le solde KC en forçant les majuscules pour éviter les erreurs de casse."""
+    clean_name = username.upper().strip()
+    resp = supabase.table("wallets").select("kongo_balance").eq("username", clean_name).execute()
+    if resp.data and len(resp.data) > 0:
         return resp.data[0]["kongo_balance"]
     return 0.0
 
 def update_wallet(username, amount, operation="add"):
-    """Ajoute ou retire des KC du wallet."""
-    wallet = supabase.table("wallets").select("kongo_balance").eq("username", username).execute()
+    clean_name = username.upper().strip()
+    wallet = supabase.table("wallets").select("kongo_balance").eq("username", clean_name).execute()
     if not wallet.data:
         return False
     current = wallet.data[0]["kongo_balance"]
     new_balance = current + amount if operation == "add" else current - amount
     if new_balance < 0:
         return False
-    supabase.table("wallets").update({"kongo_balance": new_balance}).eq("username", username).execute()
+    supabase.table("wallets").update({"kongo_balance": new_balance}).eq("username", clean_name).execute()
     return True
 
 def get_user_plan(username):
-    """Retourne le forfait actuel de l'utilisateur."""
-    resp = supabase.table("subscriptions").select("plan_type", "expires_at", "is_active").eq("username", username).execute()
+    clean_name = username.upper().strip()
+    resp = supabase.table("subscriptions").select("plan_type", "expires_at", "is_active").eq("username", clean_name).execute()
     if resp.data:
         return resp.data[0]
     return {"plan_type": "Gratuit", "expires_at": None, "is_active": True}
 
 def activate_plan(username, plan_type, duration_days=30):
-    """Active un forfait pour l'utilisateur."""
+    clean_name = username.upper().strip()
     expires_at = datetime.now() + timedelta(days=duration_days)
     data = {
-        "username": username,
+        "username": clean_name,
         "plan_type": plan_type,
         "activated_at": datetime.now().isoformat(),
         "expires_at": expires_at.isoformat(),
         "is_active": True
     }
-    supabase.table("subscriptions").delete().eq("username", username).execute()
+    supabase.table("subscriptions").delete().eq("username", clean_name).execute()
     supabase.table("subscriptions").insert(data).execute()
 
     params = {}
@@ -124,26 +125,23 @@ def activate_plan(username, plan_type, duration_days=30):
     elif plan_type == "Attracteur_Global":
         params = {"phi_m": 2.0, "phi_c": 10.0, "phi_d": 1.0}
 
-    supabase.table("tst_params").update(params).eq("username", username).execute()
+    supabase.table("tst_params").update(params).eq("username", clean_name).execute()
 
 def credit_creator(amount):
-    """Crédite le wallet du créateur (SCARABBE)."""
     update_wallet("SCARABBE", amount, "add")
 
-# --- GESTION DU WALLET DE SCARABBE ---
 def ensure_scarabbe_wallet():
-    """Si l'utilisateur est SCARABBE, on lui donne 1M KC si nécessaire."""
     if st.session_state.user == "SCARABBE":
-        wallet = supabase.table("wallets").select("kongo_balance").eq("username", "SCARABBE").execute()
+        clean_name = "SCARABBE"
+        wallet = supabase.table("wallets").select("kongo_balance").eq("username", clean_name).execute()
         if not wallet.data:
-            supabase.table("wallets").insert({"username": "SCARABBE", "kongo_balance": 1_000_000}).execute()
+            supabase.table("wallets").insert({"username": clean_name, "kongo_balance": 1_000_000}).execute()
             st.sidebar.success("🎉 Bienvenue Créateur ! 1 000 000 KC ont été crédités sur votre wallet.")
         else:
             current = wallet.data[0]["kongo_balance"]
             if current == 0.0:
-                supabase.table("wallets").update({"kongo_balance": 1_000_000}).eq("username", "SCARABBE").execute()
+                supabase.table("wallets").update({"kongo_balance": 1_000_000}).eq("username", clean_name).execute()
                 st.sidebar.success("🎉 Bienvenue Créateur ! 1 000 000 KC ont été crédités sur votre wallet.")
-# -------------------------------------
 
 # =====================================================
 # LOGIN / REGISTER
@@ -240,7 +238,8 @@ def calculate_stability(likes, comments, phi_m=1.0, phi_c=1.0, phi_d=1.0):
     return round(stability, 2)
 
 def get_user_params(username):
-    resp = supabase.table("tst_params").select("phi_m", "phi_c", "phi_d").eq("username", username).execute()
+    clean_name = username.upper().strip()
+    resp = supabase.table("tst_params").select("phi_m", "phi_c", "phi_d").eq("username", clean_name).execute()
     if resp.data:
         return resp.data[0]
     return {"phi_m": 1.0, "phi_c": 1.0, "phi_d": 1.0}
