@@ -135,22 +135,20 @@ def credit_creator(amount):
     """Crédite le wallet du créateur (SCARABBE) du montant spécifié."""
     update_wallet("SCARABBE", amount, "add")
 
-# --- CORRIGÉ : S'assurer que SCARABBE a 1M KC (avec création du wallet si nécessaire) ---
+# --- CORRIGÉ : S'assurer que SCARABBE a 1M KC (version simplifiée) ---
 def ensure_scarabbe_wallet():
-    """Si l'utilisateur est SCARABBE, on vérifie que son wallet existe et on lui donne 1M KC si vide."""
+    """Si l'utilisateur est SCARABBE, on lui donne 1M KC si son solde est à 0."""
     if st.session_state.user == "SCARABBE":
-        # Vérifier si le wallet existe
         wallet = supabase.table("wallets").select("kongo_balance").eq("username", "SCARABBE").execute()
         if not wallet.data:
-            # Créer le wallet
-            supabase.table("wallets").insert({"username": "SCARABBE", "kongo_balance": 0}).execute()
-            current = 0.0
+            # Créer le wallet avec 1M directement
+            supabase.table("wallets").insert({"username": "SCARABBE", "kongo_balance": 1_000_000}).execute()
+            st.sidebar.success("🎉 Bienvenue Créateur ! 1 000 000 KC ont été crédités sur votre wallet.")
         else:
             current = wallet.data[0]["kongo_balance"]
-        
-        if current == 0.0:
-            update_wallet("SCARABBE", 1_000_000, "add")
-            st.sidebar.success("🎉 Bienvenue Créateur ! 1 000 000 KC ont été crédités sur votre wallet.")
+            if current == 0.0:
+                supabase.table("wallets").update({"kongo_balance": 1_000_000}).eq("username", "SCARABBE").execute()
+                st.sidebar.success("🎉 Bienvenue Créateur ! 1 000 000 KC ont été crédités sur votre wallet.")
 # ------------------------------------------------
 
 # =====================================================
@@ -717,7 +715,7 @@ def marketplace():
 
     st.divider()
 
-    # --- AFFICHAGE TRIÉ PAR TST (corrigé : pas de jointure directe) ---
+    # --- AFFICHAGE TRIÉ PAR TST ---
     # Récupérer toutes les annonces actives
     resp = supabase.table("marketplace_listings").select("*").eq("is_active", True).execute()
     listings = resp.data if resp.data else []
