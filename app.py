@@ -80,22 +80,35 @@ def get_refresh_interval():
 def get_wallet(username):
     """Récupère le solde KC en forçant les majuscules pour éviter les erreurs de casse."""
     clean_name = username.upper().strip()
-    resp = supabase.table("wallets").select("kongo_balance").eq("username", clean_name).execute()
-    if resp.data and len(resp.data) > 0:
-        return resp.data[0]["kongo_balance"]
+    try:
+        resp = supabase.table("wallets").select("kongo_balance").eq("username", clean_name).execute()
+        if resp.data and len(resp.data) > 0:
+            return resp.data[0]["kongo_balance"]
+    except Exception as e:
+        st.error(f"Erreur lors de la lecture du wallet : {e}")
     return 0.0
 
 def update_wallet(username, amount, operation="add"):
+    """
+    Ajoute ou retire des KC du wallet.
+    Retourne True si succès, False sinon (avec message d'erreur).
+    """
     clean_name = username.upper().strip()
-    wallet = supabase.table("wallets").select("kongo_balance").eq("username", clean_name).execute()
-    if not wallet.data:
+    try:
+        wallet = supabase.table("wallets").select("kongo_balance").eq("username", clean_name).execute()
+        if not wallet.data:
+            st.error(f"Wallet introuvable pour {username}")
+            return False
+        current = wallet.data[0]["kongo_balance"]
+        new_balance = current + amount if operation == "add" else current - amount
+        if new_balance < 0:
+            st.error("Solde insuffisant.")
+            return False
+        supabase.table("wallets").update({"kongo_balance": new_balance}).eq("username", clean_name).execute()
+        return True
+    except Exception as e:
+        st.error(f"Erreur lors de la mise à jour du wallet : {e}")
         return False
-    current = wallet.data[0]["kongo_balance"]
-    new_balance = current + amount if operation == "add" else current - amount
-    if new_balance < 0:
-        return False
-    supabase.table("wallets").update({"kongo_balance": new_balance}).eq("username", clean_name).execute()
-    return True
 
 def get_user_plan(username):
     clean_name = username.upper().strip()
@@ -114,9 +127,11 @@ def activate_plan(username, plan_type, duration_days=30):
         "expires_at": expires_at.isoformat(),
         "is_active": True
     }
+    # On supprime l'ancien abonnement s'il existe
     supabase.table("subscriptions").delete().eq("username", clean_name).execute()
     supabase.table("subscriptions").insert(data).execute()
 
+    # Mise à jour des paramètres TST en fonction du forfait
     params = {}
     if plan_type == "Gratuit":
         params = {"phi_m": 1.0, "phi_c": 1.0, "phi_d": 1.5}
@@ -128,20 +143,24 @@ def activate_plan(username, plan_type, duration_days=30):
     supabase.table("tst_params").update(params).eq("username", clean_name).execute()
 
 def credit_creator(amount):
-    update_wallet("SCARABBE", amount, "add")
+    """Crédite le wallet du créateur (SCARABBE)."""
+    return update_wallet("SCARABBE", amount, "add")
 
 def ensure_scarabbe_wallet():
     if st.session_state.user == "SCARABBE":
         clean_name = "SCARABBE"
-        wallet = supabase.table("wallets").select("kongo_balance").eq("username", clean_name).execute()
-        if not wallet.data:
-            supabase.table("wallets").insert({"username": clean_name, "kongo_balance": 1_000_000}).execute()
-            st.sidebar.success("🎉 Bienvenue Créateur ! 1 000 000 KC ont été crédités sur votre wallet.")
-        else:
-            current = wallet.data[0]["kongo_balance"]
-            if current == 0.0:
-                supabase.table("wallets").update({"kongo_balance": 1_000_000}).eq("username", clean_name).execute()
+        try:
+            wallet = supabase.table("wallets").select("kongo_balance").eq("username", clean_name).execute()
+            if not wallet.data:
+                supabase.table("wallets").insert({"username": clean_name, "kongo_balance": 1_000_000}).execute()
                 st.sidebar.success("🎉 Bienvenue Créateur ! 1 000 000 KC ont été crédités sur votre wallet.")
+            else:
+                current = wallet.data[0]["kongo_balance"]
+                if current == 0.0:
+                    supabase.table("wallets").update({"kongo_balance": 1_000_000}).eq("username", clean_name).execute()
+                    st.sidebar.success("🎉 Bienvenue Créateur ! 1 000 000 KC ont été crédités sur votre wallet.")
+        except Exception as e:
+            st.sidebar.error(f"Erreur lors de la création du wallet : {e}")
 
 # =====================================================
 # LOGIN / REGISTER
@@ -274,6 +293,7 @@ def get_tst_ranked_posts():
         created_at = datetime.fromisoformat(p["created_at"].replace("Z", "+00:00"))
         hours_old = (now - created_at).total_seconds() / 3600
         likes = get_likes_count(p["id"])
+        # Score TST = (Cohérence active) + (Inertie mémoire) - (Dissipation temporelle)
         score = (likes * params['phi_c']) + (params['phi_m'] * 10) - (hours_old * params['phi_d'])
         p['tst_rank_score'] = score
         ranked_posts.append(p)
@@ -607,7 +627,7 @@ def shop():
     with col1:
         if st.button("Activer Gratuit (0 KC)"):
             if get_user_plan(user)['plan_type'] == 'Gratuit':
-                st.warning("Déjà en forfait Gratuit.")
+                st.warning("Vous êtes déjà en forfait Gratuit.")
             else:
                 activate_plan(user, "Gratuit", 30)
                 st.success("Forfait Gratuit activé.")
@@ -616,24 +636,31 @@ def shop():
         if st.button("Activer Pro_Memoire (50 KC)"):
             if balance >= 50:
                 if update_wallet(user, 50, "subtract"):
-                    credit_creator(50)
-                    activate_plan(user, "Pro_Memoire", 30)
-                    st.success("Forfait Pro_Memoire activé !")
-                    st.rerun()
+                    if credit_creator(50):
+                        activate_plan(user, "Pro_Memoire", 30)
+                        st.success("Forfait Pro_Memoire activé ! Votre solde a été mis à jour.")
+                        st.rerun()
+                    else:
+                        # Si le crédit créateur échoue, on rembourse l'utilisateur
+                        update_wallet(user, 50, "add")
+                        st.error("Erreur lors du crédit au créateur. Transaction annulée.")
                 else:
-                    st.error("Erreur paiement.")
+                    st.error("Erreur lors du débit de votre wallet.")
             else:
                 st.error("Solde insuffisant.")
     with col3:
         if st.button("Activer Attracteur_Global (100 KC)"):
             if balance >= 100:
                 if update_wallet(user, 100, "subtract"):
-                    credit_creator(100)
-                    activate_plan(user, "Attracteur_Global", 30)
-                    st.success("Forfait Attracteur_Global activé !")
-                    st.rerun()
+                    if credit_creator(100):
+                        activate_plan(user, "Attracteur_Global", 30)
+                        st.success("Forfait Attracteur_Global activé ! Votre solde a été mis à jour.")
+                        st.rerun()
+                    else:
+                        update_wallet(user, 100, "add")
+                        st.error("Erreur lors du crédit au créateur. Transaction annulée.")
                 else:
-                    st.error("Erreur paiement.")
+                    st.error("Erreur lors du débit de votre wallet.")
             else:
                 st.error("Solde insuffisant.")
 
@@ -641,9 +668,11 @@ def shop():
     st.subheader("Acheter des Kongo Coins (simulation)")
     amount = st.number_input("Montant de KC à ajouter", min_value=10, step=10, value=50)
     if st.button("Ajouter KC"):
-        update_wallet(user, amount, "add")
-        st.success(f"{amount} KC ajoutés !")
-        st.rerun()
+        if update_wallet(user, amount, "add"):
+            st.success(f"{amount} KC ajoutés !")
+            st.rerun()
+        else:
+            st.error("Erreur lors de l'ajout.")
 
 # =====================================================
 # MARKETPLACE TRIADIQUE
@@ -695,11 +724,14 @@ def marketplace():
                     if user == seller:
                         st.error("Vous ne pouvez pas acheter votre propre offre.")
                     elif update_wallet(user, price, "subtract"):
-                        update_wallet(seller, price - taxe, "add")
-                        update_wallet("SCARABBE", taxe, "add")
-                        supabase.table("marketplace_listings").update({"is_active": False}).eq("id", item['id']).execute()
-                        st.success(f"Achat réussi ! Taxe de {taxe:.2f} KC prélevée.")
-                        st.rerun()
+                        if update_wallet(seller, price - taxe, "add") and update_wallet("SCARABBE", taxe, "add"):
+                            supabase.table("marketplace_listings").update({"is_active": False}).eq("id", item['id']).execute()
+                            st.success(f"Achat réussi ! Taxe de {taxe:.2f} KC prélevée.")
+                            st.rerun()
+                        else:
+                            # Remboursement en cas d'échec
+                            update_wallet(user, price, "add")
+                            st.error("Erreur lors du crédit au vendeur ou au créateur. Transaction annulée.")
                     else:
                         st.error("Solde insuffisant.")
             st.divider()
@@ -779,8 +811,11 @@ def admin_panel():
         count = 0
         for sub in active_subs.data:
             if update_wallet(sub['username'], 1, "subtract"):
-                credit_creator(1)
-                count += 1
+                if credit_creator(1):
+                    count += 1
+                else:
+                    # Rembourser l'utilisateur si le crédit échoue
+                    update_wallet(sub['username'], 1, "add")
         st.success(f"{count} KC récoltés.")
 
     st.divider()
