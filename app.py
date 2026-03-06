@@ -1,16 +1,13 @@
 import streamlit as st
 import os
 import hashlib
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
 from datetime import datetime, timedelta
 from supabase import create_client, Client
 from streamlit_autorefresh import st_autorefresh
 from streamlit_mic_recorder import mic_recorder
-
-# --- IMPORTS SCIENTIFIQUES ---
-import numpy as np
-import pandas as pd
-import plotly.graph_objects as go
-# -----------------------------
 
 # =====================================================
 # CONFIG & CONNEXION SUPABASE
@@ -61,7 +58,13 @@ if "last_activity" not in st.session_state:
     st.session_state.last_activity = datetime.now()
 
 def update_activity():
+    """Met à jour l'horodatage de dernière activité et le statut en ligne."""
     st.session_state.last_activity = datetime.now()
+    if st.session_state.user:
+        try:
+            supabase.table("profiles").update({"last_active": datetime.now().isoformat()}).eq("username", st.session_state.user).execute()
+        except Exception as e:
+            st.error(f"Erreur mise à jour statut : {e}")
 
 def get_refresh_interval():
     idle = (datetime.now() - st.session_state.last_activity).seconds
@@ -71,14 +74,16 @@ def get_refresh_interval():
         return 10000     # 10 sec (inactif modéré)
     else:
         return 20000     # 20 sec (inactif)
-# ------------------------------------------------------------
+
+# --- Nettoyage mémoire basé sur le score TST ---
+if "last_cleanup" not in st.session_state:
+    st.session_state.last_cleanup = datetime.now() - timedelta(hours=24)  # pour forcer au premier appel
 
 # =====================================================
 # FONCTIONS DE GESTION DU WALLET ET FORFAITS
 # =====================================================
 
 def get_wallet(username):
-    """Récupère le solde KC en forçant les majuscules pour éviter les erreurs de casse."""
     clean_name = username.upper().strip()
     try:
         resp = supabase.table("wallets").select("kongo_balance").eq("username", clean_name).execute()
@@ -89,10 +94,6 @@ def get_wallet(username):
     return 0.0
 
 def update_wallet(username, amount, operation="add"):
-    """
-    Ajoute ou retire des KC du wallet.
-    Retourne True si succès, False sinon (avec message d'erreur).
-    """
     clean_name = username.upper().strip()
     try:
         wallet = supabase.table("wallets").select("kongo_balance").eq("username", clean_name).execute()
@@ -127,11 +128,9 @@ def activate_plan(username, plan_type, duration_days=30):
         "expires_at": expires_at.isoformat(),
         "is_active": True
     }
-    # On supprime l'ancien abonnement s'il existe
     supabase.table("subscriptions").delete().eq("username", clean_name).execute()
     supabase.table("subscriptions").insert(data).execute()
 
-    # Mise à jour des paramètres TST en fonction du forfait
     params = {}
     if plan_type == "Gratuit":
         params = {"phi_m": 1.0, "phi_c": 1.0, "phi_d": 1.5}
@@ -143,7 +142,6 @@ def activate_plan(username, plan_type, duration_days=30):
     supabase.table("tst_params").update(params).eq("username", clean_name).execute()
 
 def credit_creator(amount):
-    """Crédite le wallet du créateur (SCARABBE)."""
     return update_wallet("SCARABBE", amount, "add")
 
 def ensure_scarabbe_wallet():
@@ -163,6 +161,169 @@ def ensure_scarabbe_wallet():
             st.sidebar.error(f"Erreur lors de la création du wallet : {e}")
 
 # =====================================================
+# FONCTIONS DE GESTION DES SUIVIS (FOLLOWS)
+# =====================================================
+def follow_user(follower, followed):
+    try:
+        existing = supabase.table("follows").select("*").eq("follower", follower).eq("followed", followed).execute()
+        if not existing.data:
+            supabase.table("follows").insert({
+                "follower": follower,
+                "followed": followed,
+                "created_at": datetime.now().isoformat()
+            }).execute()
+            return True
+    except Exception as e:
+        st.error(f"Erreur follow : {e}")
+    return False
+
+def unfollow_user(follower, followed):
+    try:
+        supabase.table("follows").delete().eq("follower", follower).eq("followed", followed).execute()
+        return True
+    except Exception as e:
+        st.error(f"Erreur unfollow : {e}")
+    return False
+
+def is_following(follower, followed):
+    try:
+        existing = supabase.table("follows").select("*").eq("follower", follower).eq("followed", followed).execute()
+        return len(existing.data) > 0
+    except Exception as e:
+        st.error(f"Erreur vérification follow : {e}")
+    return False
+
+def get_followers(username):
+    try:
+        resp = supabase.table("follows").select("follower").eq("followed", username).execute()
+        return [r["follower"] for r in resp.data] if resp.data else []
+    except Exception as e:
+        st.error(f"Erreur récupération followers : {e}")
+        return []
+
+def get_following(username):
+    try:
+        resp = supabase.table("follows").select("followed").eq("follower", username).execute()
+        return [r["followed"] for r in resp.data] if resp.data else []
+    except Exception as e:
+        st.error(f"Erreur récupération following : {e}")
+        return []
+
+# =====================================================
+# FONCTIONS DE GESTION DU STATUT EN LIGNE
+# =====================================================
+def get_online_users(threshold_minutes=5):
+    try:
+        cutoff = (datetime.now() - timedelta(minutes=threshold_minutes)).isoformat()
+        resp = supabase.table("profiles").select("username").gt("last_active", cutoff).execute()
+        return [u["username"] for u in resp.data] if resp.data else []
+    except Exception as e:
+        st.error(f"Erreur récupération en ligne : {e}")
+        return []
+
+# =====================================================
+# CŒUR TST : PARAMÈTRES ET SCORES
+# =====================================================
+def get_user_params(username):
+    clean_name = username.upper().strip()
+    resp = supabase.table("tst_params").select("phi_m", "phi_c", "phi_d").eq("username", clean_name).execute()
+    if resp.data:
+        return resp.data[0]
+    return {"phi_m": 1.0, "phi_c": 1.0, "phi_d": 1.0}
+
+def calculate_post_score(post, params=None):
+    """Calcule le score TST d'un post public."""
+    if params is None:
+        params = get_user_params(post["username"])
+    created_at = datetime.fromisoformat(post["created_at"].replace("Z", "+00:00"))
+    hours_old = (datetime.now().astimezone() - created_at).total_seconds() / 3600
+    likes = get_likes_count(post["id"])  # nécessite la fonction get_likes_count définie plus tard
+    # Score = (Cohérence active) + (Inertie mémoire) - (Dissipation temporelle)
+    score = (likes * params['phi_c']) + (params['phi_m'] * 10) - (hours_old * params['phi_d'])
+    return score
+
+def calculate_private_message_score(message, sender_params):
+    """
+    Calcule le score TST d'un message privé.
+    - texte : longueur en caractères * phi_m
+    - média : bonus de cohérence (phi_c)
+    - âge : dissipation (phi_d)
+    """
+    age_hours = (datetime.now().astimezone() - datetime.fromisoformat(message["created_at"].replace("Z", "+00:00"))).total_seconds() / 3600
+    base = 0
+    if message.get("text"):
+        base = len(message["text"]) * sender_params['phi_m']
+    if message.get("audio_path"):
+        base += sender_params['phi_c'] * 5   # bonus audio
+    if message.get("video_path"):
+        base += sender_params['phi_c'] * 10  # bonus vidéo
+    score = base - (age_hours * sender_params['phi_d'])
+    return max(score, 0)  # pas de score négatif
+
+# =====================================================
+# NETTOYAGE MÉMOIRE BASÉ SUR LA MOYENNE DES SCORES
+# =====================================================
+def perform_memory_cleanup(force=False):
+    """
+    Supprime les messages publics et privés dont le score est inférieur à la moyenne.
+    Exécuté au maximum toutes les 6 heures (sauf force=True).
+    """
+    now = datetime.now()
+    if not force and (now - st.session_state.last_cleanup).total_seconds() < 21600:  # 6h
+        return
+    st.session_state.last_cleanup = now
+
+    # --- Nettoyage des posts publics ---
+    try:
+        posts_resp = supabase.table("posts").select("*").execute()
+        posts = posts_resp.data if posts_resp.data else []
+        if posts:
+            scores = []
+            for p in posts:
+                params = get_user_params(p["username"])
+                score = calculate_post_score(p, params)
+                scores.append(score)
+            if scores:
+                mean_score = np.mean(scores)
+                threshold = mean_score * 0.7  # légèrement en dessous de la moyenne
+                to_delete = []
+                for p in posts:
+                    params = get_user_params(p["username"])
+                    score = calculate_post_score(p, params)
+                    if score < threshold:
+                        to_delete.append(p["id"])
+                if to_delete:
+                    supabase.table("posts").delete().in_("id", to_delete).execute()
+                    st.sidebar.info(f"🧹 {len(to_delete)} posts dissipés (score < seuil).")
+    except Exception as e:
+        st.error(f"Erreur nettoyage posts : {e}")
+
+    # --- Nettoyage des messages privés ---
+    try:
+        msgs_resp = supabase.table("messages").select("*").execute()
+        msgs = msgs_resp.data if msgs_resp.data else []
+        if msgs:
+            scores = []
+            for m in msgs:
+                sender_params = get_user_params(m["sender"])
+                score = calculate_private_message_score(m, sender_params)
+                scores.append(score)
+            if scores:
+                mean_score = np.mean(scores)
+                threshold = mean_score * 0.7
+                to_delete = []
+                for m in msgs:
+                    sender_params = get_user_params(m["sender"])
+                    score = calculate_private_message_score(m, sender_params)
+                    if score < threshold:
+                        to_delete.append(m["id"])
+                if to_delete:
+                    supabase.table("messages").delete().in_("id", to_delete).execute()
+                    st.sidebar.info(f"🧹 {len(to_delete)} messages privés dissipés (score < seuil).")
+    except Exception as e:
+        st.error(f"Erreur nettoyage messages : {e}")
+
+# =====================================================
 # LOGIN / REGISTER
 # =====================================================
 def login():
@@ -180,6 +341,7 @@ def login():
                 user_data = response.data[0]
                 if user_data["password"] == hash_password(password):
                     st.session_state.user = username
+                    supabase.table("profiles").update({"last_active": datetime.now().isoformat()}).eq("username", username).execute()
                     update_activity()
                     ensure_scarabbe_wallet()
                     st.rerun()
@@ -217,6 +379,7 @@ def login():
                     "bio": bio,
                     "location": location,
                     "profile_pic": profile_pic_url,
+                    "last_active": datetime.now().isoformat()
                 }
                 supabase.table("profiles").insert(user_dict).execute()
                 st.success("Compte créé sur le Cloud ! Vous pouvez maintenant vous connecter.")
@@ -250,49 +413,30 @@ def banner():
     st.divider()
 
 # =====================================================
-# CŒUR TST
+# GESTION DES LIKES
 # =====================================================
-def calculate_stability(likes, comments, phi_m=1.0, phi_c=1.0, phi_d=1.0):
-    stability = (likes * phi_m * 0.6 + comments * phi_c * 0.4) * np.exp(-phi_d)
-    return round(stability, 2)
+def get_likes_count(post_id):
+    resp = supabase.table("likes").select("*", count="exact").eq("post_id", post_id).execute()
+    return resp.count if hasattr(resp, 'count') else len(resp.data)
 
-def get_user_params(username):
-    clean_name = username.upper().strip()
-    resp = supabase.table("tst_params").select("phi_m", "phi_c", "phi_d").eq("username", clean_name).execute()
-    if resp.data:
-        return resp.data[0]
-    return {"phi_m": 1.0, "phi_c": 1.0, "phi_d": 1.0}
-
-# =====================================================
-# GESTION DES LIKES (AVEC MINAGE ET ÉVOLUTION TST)
-# =====================================================
 def like_post(post_id, username):
     existing = supabase.table("likes").select("*").eq("post_id", post_id).eq("username", username).execute()
     if not existing.data:
-        # 1. Enregistre le like
         supabase.table("likes").insert({"post_id": post_id, "username": username}).execute()
 
-        # 2. Récupère l'auteur du post
         post_author_resp = supabase.table("posts").select("username").eq("id", post_id).execute()
         if post_author_resp.data:
             author = post_author_resp.data[0]["username"]
-
-            # 3. Récompense financière (minage) : 0.1 KC pour l'auteur
             update_wallet(author, 0.1, "add")
 
-            # 4. Évolution TST : chaque like augmente légèrement la mémoire (phi_m) de l'auteur
             current_params = get_user_params(author)
             new_phi_m = current_params['phi_m'] + 0.01
             supabase.table("tst_params").update({"phi_m": new_phi_m}).eq("username", author.upper()).execute()
 
         update_activity()
 
-def get_likes_count(post_id):
-    resp = supabase.table("likes").select("*", count="exact").eq("post_id", post_id).execute()
-    return resp.count if hasattr(resp, 'count') else len(resp.data)
-
 # =====================================================
-# FIL SOCIAL AVEC TRI TST
+# FIL SOCIAL
 # =====================================================
 def get_tst_ranked_posts():
     posts_resp = supabase.table("posts").select("*, tst_params(*)").order("created_at", desc=True).limit(50).execute()
@@ -304,7 +448,6 @@ def get_tst_ranked_posts():
         created_at = datetime.fromisoformat(p["created_at"].replace("Z", "+00:00"))
         hours_old = (now - created_at).total_seconds() / 3600
         likes = get_likes_count(p["id"])
-        # Score TST = (Cohérence active) + (Inertie mémoire) - (Dissipation temporelle)
         score = (likes * params['phi_c']) + (params['phi_m'] * 10) - (hours_old * params['phi_d'])
         p['tst_rank_score'] = score
         ranked_posts.append(p)
@@ -313,6 +456,7 @@ def get_tst_ranked_posts():
 
 def feed():
     st_autorefresh(interval=get_refresh_interval(), key="feed_refresh")
+    perform_memory_cleanup()  # nettoyage périodique
     banner()
     st.subheader("Exprime toi")
 
@@ -421,37 +565,36 @@ def feed():
             st.divider()
 
 # =====================================================
-# MESSAGERIE OPTIMISÉE (PAGINATION 10 MESSAGES)
+# MESSAGERIE
 # =====================================================
 
-@st.cache_data(ttl=300)  # Cache de 5 minutes
+@st.cache_data(ttl=300)
 def get_other_users(current_user):
-    """Retourne la liste des autres utilisateurs (mise en cache)."""
     resp = supabase.table("profiles").select("username").neq("username", current_user).execute()
     return [u["username"] for u in resp.data] if resp.data else []
 
 def messenger():
     st_autorefresh(interval=get_refresh_interval(), key="msg_refresh")
+    perform_memory_cleanup()  # nettoyage périodique
     st.header("Messagerie")
 
-    # Récupérer les autres utilisateurs (avec cache)
     users_list = get_other_users(st.session_state.user)
     if not users_list:
         st.info("Aucun autre utilisateur")
         return
 
-    # Sélection du destinataire
     target = st.selectbox("Choisir utilisateur", users_list, key="msg_target")
 
-    # Gestion de la pagination propre à chaque conversation
     conv_key = f"page_{st.session_state.user}_{target}"
     if conv_key not in st.session_state:
-        st.session_state[conv_key] = 1  # page courante (1 = plus récents)
+        st.session_state[conv_key] = 1
 
-    # Fonction pour charger les messages de la conversation (par pages de 10)
+    last_seen_key = f"last_seen_{st.session_state.user}_{target}"
+    if last_seen_key not in st.session_state:
+        st.session_state[last_seen_key] = None
+
     def load_messages(page=1, per_page=10):
         offset = (page - 1) * per_page
-        # Construire le filtre : (sender=moi et recipient=target) OU (sender=target et recipient=moi)
         filter_str = f"and(sender.eq.{st.session_state.user},recipient.eq.{target}),and(sender.eq.{target},recipient.eq.{st.session_state.user})"
         resp = supabase.table("messages").select("*")\
             .or_(filter_str)\
@@ -459,14 +602,17 @@ def messenger():
             .range(offset, offset + per_page - 1)\
             .execute()
         messages = resp.data if resp.data else []
-        # Inverser pour avoir l'ordre chronologique (plus ancien en premier dans l'affichage)
         messages.reverse()
         return messages
 
-    # Charger les messages de la page courante
     messages = load_messages(st.session_state[conv_key])
 
-    # Afficher les messages
+    if messages:
+        last_msg_time = datetime.fromisoformat(messages[-1]["created_at"].replace("Z", "+00:00"))
+        if st.session_state[last_seen_key] is None or last_msg_time > datetime.fromisoformat(st.session_state[last_seen_key]):
+            st.info("🔔 Nouveaux messages dans cette conversation")
+        st.session_state[last_seen_key] = messages[-1]["created_at"]
+
     for m in messages:
         if m["sender"] == st.session_state.user:
             prefix = "🟢 **Moi** : "
@@ -482,10 +628,8 @@ def messenger():
         else:
             st.write(prefix + m.get("text", ""))
 
-    # Bouton pour charger plus anciens
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        # Vérifier s'il y a encore des messages à charger (on regarde si on a reçu exactement 10 messages)
         if len(messages) == 10:
             if st.button("📜 Messages plus anciens"):
                 st.session_state[conv_key] += 1
@@ -570,9 +714,8 @@ def messenger():
 
         if upload_success:
             supabase.table("messages").insert(message_dict).execute()
-            # Réinitialiser la page pour voir le nouveau message
             st.session_state[conv_key] = 1
-            # Vider le cache des utilisateurs (pas nécessaire, mais on peut)
+            st.session_state[last_seen_key] = datetime.now().isoformat()
             get_other_users.clear()
             update_activity()
             st.rerun()
@@ -608,6 +751,28 @@ def profile():
     if plan_info['expires_at']:
         expires = datetime.fromisoformat(plan_info['expires_at'].replace("Z", "+00:00"))
         st.caption(f"Expire le : {expires.strftime('%Y-%m-%d %H:%M')}")
+
+    followers = get_followers(user)
+    following = get_following(user)
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("👥 Followers", len(followers))
+    with col2:
+        st.metric("👤 Suivis", len(following))
+
+    with st.expander("Voir les followers"):
+        if followers:
+            for f in followers:
+                st.write(f"@{f}")
+        else:
+            st.write("Aucun follower pour l'instant.")
+
+    with st.expander("Voir les personnes suivies"):
+        if following:
+            for f in following:
+                st.write(f"@{f}")
+        else:
+            st.write("Vous ne suivez personne.")
 
     st.subheader("Modifier les informations")
     new_bio = st.text_area("Bio", value=profile_data.get("bio", ""))
@@ -655,7 +820,7 @@ def profile():
                 update_activity()
 
 # =====================================================
-# BOUTIQUE / FORFAITS (NOUVELLE VERSION)
+# BOUTIQUE
 # =====================================================
 def shop():
     st.header("💎 Boutique de Stabilité (Forfaits TST)")
@@ -678,15 +843,11 @@ def shop():
 
             if st.button(f"Activer {name}", key=f"buy_{name}"):
                 if balance >= info["price"]:
-                    # --- ACTION 1: On retire l'argent ---
                     if update_wallet(user, info["price"], "subtract"):
-                        # --- ACTION 2: On active le plan et les paramètres TST ---
                         activate_plan(user, name)
-                        # --- ACTION 3: On crédite le créateur (Taxe SCARABBE 10%) ---
                         taxe = info["price"] * 0.1
                         if taxe > 0:
                             if not credit_creator(taxe):
-                                # Si le crédit échoue, on rembourse l'utilisateur
                                 update_wallet(user, info["price"], "add")
                                 st.error("Erreur lors du crédit au créateur. Transaction annulée.")
                                 st.stop()
@@ -708,7 +869,7 @@ def shop():
             st.error("Erreur lors de l'ajout.")
 
 # =====================================================
-# MARKETPLACE TRIADIQUE
+# MARKETPLACE
 # =====================================================
 def marketplace():
     st.header("🏪 Marketplace Free_Kogossa")
@@ -762,7 +923,6 @@ def marketplace():
                             st.success(f"Achat réussi ! Taxe de {taxe:.2f} KC prélevée.")
                             st.rerun()
                         else:
-                            # Remboursement en cas d'échec
                             update_wallet(user, price, "add")
                             st.error("Erreur lors du crédit au vendeur ou au créateur. Transaction annulée.")
                     else:
@@ -770,7 +930,7 @@ def marketplace():
             st.divider()
 
 # =====================================================
-# ADMIN PANEL (avec dissipation des messages)
+# ADMIN PANEL
 # =====================================================
 def admin_panel():
     admin_email_hash = hashlib.sha256("mayombochristal@gmail.com".encode()).hexdigest()
@@ -804,6 +964,10 @@ def admin_panel():
     mon_solde = get_wallet("SCARABBE")
     st.sidebar.metric("Trésor", f"{mon_solde:.2f} KC")
 
+    if st.sidebar.button("🧹 Forcer le nettoyage mémoire TST"):
+        perform_memory_cleanup(force=True)
+        st.sidebar.success("Nettoyage forcé effectué.")
+
     if st.sidebar.button("🧹 Lancer la Dissipation (posts anciens)"):
         cutoff = (datetime.now() - timedelta(days=7)).isoformat()
         gratuit_users = supabase.table("subscriptions").select("username").eq("plan_type", "Gratuit").eq("is_active", True).execute()
@@ -812,7 +976,6 @@ def admin_panel():
             supabase.table("posts").delete().filter("username", "in", usernames).filter("created_at", "lt", cutoff).execute()
         st.sidebar.success("Dissipation effectuée (posts gratuits >7j).")
 
-    # Nouvelle fonction de dissipation des messages
     if st.sidebar.button("🗑️ Dissipation des messages (30 jours)"):
         cutoff = (datetime.now() - timedelta(days=30)).isoformat()
         try:
@@ -856,7 +1019,6 @@ def admin_panel():
                 if credit_creator(1):
                     count += 1
                 else:
-                    # Rembourser l'utilisateur si le crédit échoue
                     update_wallet(sub['username'], 1, "add")
         st.success(f"{count} KC récoltés.")
 
@@ -967,6 +1129,28 @@ else:
     st.sidebar.title("Free_Kogossa")
     kc_balance = get_wallet(st.session_state.user)
     st.sidebar.metric("💰 Kongo Coins", f"{kc_balance:.2f} KC")
+
+    # Affichage des utilisateurs en ligne
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("🟢 En ligne")
+    online_users = get_online_users(threshold_minutes=5)
+    online_users = [u for u in online_users if u != st.session_state.user]
+    if online_users:
+        for ou in online_users:
+            col1, col2 = st.sidebar.columns([3, 1])
+            with col1:
+                st.write(f"@{ou}")
+            with col2:
+                if is_following(st.session_state.user, ou):
+                    if st.button("Unfollow", key=f"unfollow_{ou}"):
+                        unfollow_user(st.session_state.user, ou)
+                        st.rerun()
+                else:
+                    if st.button("Follow", key=f"follow_{ou}"):
+                        follow_user(st.session_state.user, ou)
+                        st.rerun()
+    else:
+        st.sidebar.write("Aucun utilisateur en ligne.")
 
     menu_options = ["Fil social", "Messagerie", "Profil", "Boutique", "Marketplace", "Laboratoire TST", "À propos / Créateur"]
     if st.session_state.user == "SCARABBE":
