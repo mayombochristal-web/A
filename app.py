@@ -6,11 +6,11 @@ from supabase import create_client, Client
 from streamlit_autorefresh import st_autorefresh
 from streamlit_mic_recorder import mic_recorder
 
-# --- NOUVEAUX IMPORTS POUR LA PARTIE SCIENTIFIQUE ---
+# --- IMPORTS SCIENTIFIQUES ---
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-# ----------------------------------------------------
+# -----------------------------
 
 # =====================================================
 # CONFIG & CONNEXION SUPABASE
@@ -38,10 +38,6 @@ def hash_password(password):
 # UPLOAD VERS SUPABASE STORAGE (URL PUBLIQUE)
 # =====================================================
 def upload_to_storage(file_data, filename, content_type=None):
-    """
-    Upload un fichier vers le bucket 'uploads' (public) et retourne l'URL publique.
-    Retourne None en cas d'échec.
-    """
     try:
         supabase.storage.from_(BUCKET_NAME).upload(
             path=filename,
@@ -68,31 +64,28 @@ def update_activity():
     st.session_state.last_activity = datetime.now()
 
 def get_refresh_interval():
-    """Retourne l'intervalle de rafraîchissement selon l'inactivité (principe de dissipation)."""
     idle = (datetime.now() - st.session_state.last_activity).seconds
     if idle < 60:
-        return 2000      # actif : 2 secondes
+        return 2000
     elif idle < 300:
-        return 5000      # 5 secondes
+        return 5000
     else:
-        return 10000     # inactif : 10 secondes
-# ----------------------------------------------------
+        return 10000
+# ------------------------------------------------------------
 
 # =====================================================
 # FONCTIONS DE GESTION DU WALLET ET FORFAITS
 # =====================================================
 
 def get_wallet(username):
-    if st.button("🔄 Rafraîchir le solde"):
-    balance = get_wallet(st.session_state.user)
-    st.experimental_rerun()
+    """Retourne le solde KC de l'utilisateur."""
     resp = supabase.table("wallets").select("kongo_balance").eq("username", username).execute()
     if resp.data:
         return resp.data[0]["kongo_balance"]
     return 0.0
 
 def update_wallet(username, amount, operation="add"):
-    """Ajoute ou retire des KC du wallet. operation : 'add' ou 'subtract'."""
+    """Ajoute ou retire des KC du wallet."""
     wallet = supabase.table("wallets").select("kongo_balance").eq("username", username).execute()
     if not wallet.data:
         return False
@@ -111,7 +104,7 @@ def get_user_plan(username):
     return {"plan_type": "Gratuit", "expires_at": None, "is_active": True}
 
 def activate_plan(username, plan_type, duration_days=30):
-    """Active un forfait pour l'utilisateur (met à jour subscriptions et tst_params)."""
+    """Active un forfait pour l'utilisateur."""
     expires_at = datetime.now() + timedelta(days=duration_days)
     data = {
         "username": username,
@@ -134,16 +127,15 @@ def activate_plan(username, plan_type, duration_days=30):
     supabase.table("tst_params").update(params).eq("username", username).execute()
 
 def credit_creator(amount):
-    """Crédite le wallet du créateur (SCARABBE) du montant spécifié."""
+    """Crédite le wallet du créateur (SCARABBE)."""
     update_wallet("SCARABBE", amount, "add")
 
-# --- CORRIGÉ : S'assurer que SCARABBE a 1M KC (version simplifiée) ---
+# --- GESTION DU WALLET DE SCARABBE ---
 def ensure_scarabbe_wallet():
-    """Si l'utilisateur est SCARABBE, on lui donne 1M KC si son solde est à 0."""
+    """Si l'utilisateur est SCARABBE, on lui donne 1M KC si nécessaire."""
     if st.session_state.user == "SCARABBE":
         wallet = supabase.table("wallets").select("kongo_balance").eq("username", "SCARABBE").execute()
         if not wallet.data:
-            # Créer le wallet avec 1M directement
             supabase.table("wallets").insert({"username": "SCARABBE", "kongo_balance": 1_000_000}).execute()
             st.sidebar.success("🎉 Bienvenue Créateur ! 1 000 000 KC ont été crédités sur votre wallet.")
         else:
@@ -151,10 +143,10 @@ def ensure_scarabbe_wallet():
             if current == 0.0:
                 supabase.table("wallets").update({"kongo_balance": 1_000_000}).eq("username", "SCARABBE").execute()
                 st.sidebar.success("🎉 Bienvenue Créateur ! 1 000 000 KC ont été crédités sur votre wallet.")
-# ------------------------------------------------
+# -------------------------------------
 
 # =====================================================
-# LOGIN / REGISTER (AVEC SUPABASE)
+# LOGIN / REGISTER
 # =====================================================
 def login():
     st.title("🌍 Free_Kogossa x GEN-Z GABON")
@@ -213,7 +205,7 @@ def login():
                 st.success("Compte créé sur le Cloud ! Vous pouvez maintenant vous connecter.")
 
 # =====================================================
-# BANNIERE DE PROFIL (depuis Supabase)
+# BANNIERE DE PROFIL
 # =====================================================
 def banner():
     user = st.session_state.user
@@ -226,85 +218,66 @@ def banner():
 
     st.divider()
     col1, col2 = st.columns([1, 4])
-
     with col1:
         pic_url = profile.get("profile_pic", "")
         if pic_url:
             st.image(pic_url, width=120)
         else:
             st.caption("(aucune photo)")
-
     with col2:
         st.title(user)
         if profile.get("bio"):
             st.write(profile["bio"])
         if profile.get("location"):
             st.caption("📍 " + profile["location"])
-
     st.divider()
 
 # =====================================================
-# CŒUR TST (calcul de stabilité)
+# CŒUR TST
 # =====================================================
 def calculate_stability(likes, comments, phi_m=1.0, phi_c=1.0, phi_d=1.0):
-    """
-    Applique la TTU-MC3 avec coefficients personnalisables.
-    """
     stability = (likes * phi_m * 0.6 + comments * phi_c * 0.4) * np.exp(-phi_d)
     return round(stability, 2)
 
 def get_user_params(username):
-    """Récupère les paramètres TST de l'utilisateur."""
     resp = supabase.table("tst_params").select("phi_m", "phi_c", "phi_d").eq("username", username).execute()
     if resp.data:
         return resp.data[0]
     return {"phi_m": 1.0, "phi_c": 1.0, "phi_d": 1.0}
 
 # =====================================================
-# Gestion des likes (avec MINAGE)
+# GESTION DES LIKES (AVEC MINAGE)
 # =====================================================
 def like_post(post_id, username):
-    """Ajoute un like pour un post et récompense l'auteur."""
-    # Vérifier si déjà liké
     existing = supabase.table("likes").select("*").eq("post_id", post_id).eq("username", username).execute()
     if not existing.data:
         supabase.table("likes").insert({"post_id": post_id, "username": username}).execute()
-        # --- RÉCOMPENSE TST : l'auteur gagne 0.1 KC ---
         post_author_resp = supabase.table("posts").select("username").eq("id", post_id).execute()
         if post_author_resp.data:
             author = post_author_resp.data[0]["username"]
             update_wallet(author, 0.1, "add")
-        # ------------------------------------------------
         update_activity()
 
 def get_likes_count(post_id):
-    """Retourne le nombre de likes pour un post."""
     resp = supabase.table("likes").select("*", count="exact").eq("post_id", post_id).execute()
     return resp.count if hasattr(resp, 'count') else len(resp.data)
 
 # =====================================================
-# FIL SOCIAL AVEC TRI TST ET BADGES
+# FIL SOCIAL AVEC TRI TST
 # =====================================================
 def get_tst_ranked_posts():
-    """Récupère et trie les posts selon l'algorithme TST."""
-    # On joint posts avec tst_params (nécessite une clé étrangère)
     posts_resp = supabase.table("posts").select("*, tst_params(*)").order("created_at", desc=True).limit(50).execute()
     posts = posts_resp.data if posts_resp.data else []
-
     ranked_posts = []
     now = datetime.now().astimezone()
-
     for p in posts:
         params = p.get('tst_params', {"phi_m": 1.0, "phi_c": 1.0, "phi_d": 1.0})
         created_at = datetime.fromisoformat(p["created_at"].replace("Z", "+00:00"))
         hours_old = (now - created_at).total_seconds() / 3600
         likes = get_likes_count(p["id"])
-
-        # Score TST = (Cohérence active) + (Inertie mémoire) - (Dissipation temporelle)
         score = (likes * params['phi_c']) + (params['phi_m'] * 10) - (hours_old * params['phi_d'])
         p['tst_rank_score'] = score
         ranked_posts.append(p)
-
     ranked_posts.sort(key=lambda x: x['tst_rank_score'], reverse=True)
     return ranked_posts
 
@@ -313,7 +286,6 @@ def feed():
     banner()
     st.subheader("Exprime toi")
 
-    # Formulaire de publication
     text = st.text_area("Message")
     col_img, col_vid = st.columns(2)
     with col_img:
@@ -321,31 +293,30 @@ def feed():
     with col_vid:
         video = st.file_uploader("Vidéo", type=["mp4", "mov", "avi", "mkv"], key="feed_video")
 
-    if img is not None and img.size > 50 * 1024 * 1024:
+    if img and img.size > 50 * 1024 * 1024:
         st.error("Cette image est trop lourde (max 50 Mo)")
         st.stop()
-    if video is not None and video.size > 50 * 1024 * 1024:
+    if video and video.size > 50 * 1024 * 1024:
         st.error("Cette vidéo dépasse la limite de 50 Mo de Supabase")
         st.stop()
 
     if st.button("Publier"):
         media_url = ""
         media_type = None
-
-        if img is not None:
+        if img:
             ext = img.name.split('.')[-1]
             filename = f"post_img_{st.session_state.user}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{ext}"
             media_url = upload_to_storage(img.getvalue(), filename, img.type)
             if not media_url:
-                st.error("L'image n'a pas pu être uploadée. Publication annulée.")
+                st.error("L'image n'a pas pu être uploadée.")
                 st.stop()
             media_type = "image"
-        elif video is not None:
+        elif video:
             ext = video.name.split('.')[-1]
             filename = f"post_vid_{st.session_state.user}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{ext}"
             media_url = upload_to_storage(video.getvalue(), filename, video.type)
             if not media_url:
-                st.error("La vidéo n'a pas pu être uploadée. Publication annulée.")
+                st.error("La vidéo n'a pas pu être uploadée.")
                 st.stop()
             media_type = "video"
 
@@ -362,12 +333,9 @@ def feed():
     st.divider()
     st.subheader("Fil d'actualité Triadique")
 
-    # Affichage des posts triés
     posts = get_tst_ranked_posts()
-
     for post in posts:
         with st.container():
-            # Badge de stabilité
             score = post.get('tst_rank_score', 0)
             col_name, col_score = st.columns([3, 1])
             with col_name:
@@ -393,7 +361,6 @@ def feed():
             created_at = datetime.fromisoformat(post["created_at"].replace("Z", "+00:00"))
             st.caption(created_at.strftime("%Y-%m-%d %H:%M"))
 
-            # Likes et commentaires
             likes_count = get_likes_count(post["id"])
             col1, col2 = st.columns([1, 10])
             with col1:
@@ -424,7 +391,7 @@ def feed():
             st.divider()
 
 # =====================================================
-# MESSAGERIE (inchangée)
+# MESSAGERIE
 # =====================================================
 def messenger():
     st_autorefresh(interval=get_refresh_interval(), key="msg_refresh")
@@ -432,7 +399,6 @@ def messenger():
 
     users_response = supabase.table("profiles").select("username").neq("username", st.session_state.user).execute()
     users_list = [u["username"] for u in users_response.data] if users_response.data else []
-
     if not users_list:
         st.info("Aucun autre utilisateur")
         return
@@ -472,7 +438,7 @@ def messenger():
 
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        text_msg = st.text_area("Texte", key="msg_text", height=100, label_visibility="collapsed", placeholder="Écris ton message...")
+        text_msg = st.text_area("Texte", key="msg_text", height=100, placeholder="Écris ton message...")
     with col2:
         audio_file = st.file_uploader("🎵 Audio (fichier)", type=["mp3", "wav", "ogg"], key="msg_audio")
     with col3:
@@ -487,28 +453,24 @@ def messenger():
         )
 
     if st.button("Envoyer message", type="primary"):
-        if audio_file is not None and audio_file.size > 50 * 1024 * 1024:
+        if audio_file and audio_file.size > 50 * 1024 * 1024:
             st.error("Fichier audio trop lourd (max 50 Mo)")
             st.stop()
-
-        if video_file is not None and video_file.size > 50 * 1024 * 1024:
+        if video_file and video_file.size > 50 * 1024 * 1024:
             st.error("Fichier vidéo trop lourd (max 50 Mo)")
             st.stop()
 
         audio_bytes = None
-        if recorder_output is not None:
+        if recorder_output:
             if isinstance(recorder_output, dict):
                 audio_bytes = recorder_output.get("bytes")
             else:
                 audio_bytes = recorder_output
 
-        message_dict = {
-            "sender": st.session_state.user,
-            "recipient": target,
-        }
+        message_dict = {"sender": st.session_state.user, "recipient": target}
         upload_success = False
 
-        if audio_bytes is not None:
+        if audio_bytes:
             filename = f"voice_{st.session_state.user}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.wav"
             url = upload_to_storage(audio_bytes, filename, "audio/wav")
             if url:
@@ -517,7 +479,7 @@ def messenger():
             else:
                 st.error("L'enregistrement audio n'a pas pu être uploadé.")
                 st.stop()
-        elif audio_file is not None:
+        elif audio_file:
             ext = audio_file.name.split('.')[-1]
             filename = f"audio_{st.session_state.user}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{ext}"
             url = upload_to_storage(audio_file.getvalue(), filename, audio_file.type)
@@ -527,7 +489,7 @@ def messenger():
             else:
                 st.error("Le fichier audio n'a pas pu être uploadé.")
                 st.stop()
-        elif video_file is not None:
+        elif video_file:
             ext = video_file.name.split('.')[-1]
             filename = f"video_{st.session_state.user}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{ext}"
             url = upload_to_storage(video_file.getvalue(), filename, video_file.type)
@@ -537,7 +499,7 @@ def messenger():
             else:
                 st.error("Le fichier vidéo n'a pas pu être uploadé.")
                 st.stop()
-        elif text_msg.strip() != "":
+        elif text_msg.strip():
             message_dict["text"] = text_msg
             upload_success = True
         else:
@@ -550,7 +512,7 @@ def messenger():
             st.rerun()
 
 # =====================================================
-# PROFIL (inchangé)
+# PROFIL
 # =====================================================
 def profile():
     user = st.session_state.user
@@ -599,7 +561,7 @@ def profile():
             if pic_url:
                 update_dict["profile_pic"] = pic_url
             else:
-                st.error("Échec de l'upload de la nouvelle photo. Mise à jour annulée.")
+                st.error("Échec de l'upload.")
                 st.stop()
 
         if update_dict:
@@ -612,7 +574,7 @@ def profile():
     with st.expander("Modifier le mot de passe"):
         old_pass = st.text_input("Ancien mot de passe", type="password")
         new_pass1 = st.text_input("Nouveau mot de passe", type="password")
-        new_pass2 = st.text_input("Confirmer le nouveau mot de passe", type="password")
+        new_pass2 = st.text_input("Confirmer", type="password")
 
         if st.button("Changer le mot de passe"):
             if profile_data["password"] != hash_password(old_pass):
@@ -620,35 +582,33 @@ def profile():
             elif new_pass1 != new_pass2:
                 st.error("Les nouveaux mots de passe ne correspondent pas")
             elif len(new_pass1) < 4:
-                st.error("Le mot de passe doit contenir au moins 4 caractères")
+                st.error("Mot de passe trop court (min 4)")
             else:
                 supabase.table("profiles").update({"password": hash_password(new_pass1)}).eq("username", user).execute()
-                st.success("Mot de passe modifié avec succès !")
+                st.success("Mot de passe modifié !")
                 update_activity()
 
 # =====================================================
-# BOUTIQUE / FORFAITS (inchangé)
+# BOUTIQUE / FORFAITS
 # =====================================================
 def shop():
     st.header("🛒 Boutique des Forfaits Physiques")
     user = st.session_state.user
     balance = get_wallet(user)
-
     st.metric("Votre solde", f"{balance:.2f} KC")
 
-    st.subheader("Améliorez votre présence avec les forfaits TTU‑MC³")
+    st.subheader("Forfaits TTU‑MC³")
     st.markdown("""
     - **Gratuit** : Dissipation rapide, visibilité standard. (0 KC)
-    - **Pro_Memoire** : Vos posts durent plus longtemps (faible dissipation). (50 KC / mois)
-    - **Attracteur_Global** : Devenez le centre d'attraction du réseau (visibilité ×10). (100 KC / mois)
+    - **Pro_Memoire** : Vos posts durent plus longtemps (50 KC / mois)
+    - **Attracteur_Global** : Devenez le centre d'attraction (100 KC / mois)
     """)
 
     col1, col2, col3 = st.columns(3)
     with col1:
         if st.button("Activer Gratuit (0 KC)"):
-            current = get_user_plan(user)
-            if current['plan_type'] == 'Gratuit':
-                st.warning("Vous êtes déjà en forfait Gratuit.")
+            if get_user_plan(user)['plan_type'] == 'Gratuit':
+                st.warning("Déjà en forfait Gratuit.")
             else:
                 activate_plan(user, "Gratuit", 30)
                 st.success("Forfait Gratuit activé.")
@@ -662,7 +622,7 @@ def shop():
                     st.success("Forfait Pro_Memoire activé !")
                     st.rerun()
                 else:
-                    st.error("Erreur lors du paiement.")
+                    st.error("Erreur paiement.")
             else:
                 st.error("Solde insuffisant.")
     with col3:
@@ -674,21 +634,20 @@ def shop():
                     st.success("Forfait Attracteur_Global activé !")
                     st.rerun()
                 else:
-                    st.error("Erreur lors du paiement.")
+                    st.error("Erreur paiement.")
             else:
                 st.error("Solde insuffisant.")
 
     st.divider()
-    st.subheader("Acheter des Kongo Coins")
-    st.markdown("(Simulation – à connecter à un vrai système de paiement)")
+    st.subheader("Acheter des Kongo Coins (simulation)")
     amount = st.number_input("Montant de KC à ajouter", min_value=10, step=10, value=50)
     if st.button("Ajouter KC"):
         update_wallet(user, amount, "add")
-        st.success(f"{amount} KC ajoutés à votre wallet !")
+        st.success(f"{amount} KC ajoutés !")
         st.rerun()
 
 # =====================================================
-# MARKETPLACE TRIADIQUE (CORRIGÉE)
+# MARKETPLACE TRIADIQUE
 # =====================================================
 def marketplace():
     st.header("🏪 Marketplace Free_Kogossa")
@@ -696,38 +655,29 @@ def marketplace():
     balance = get_wallet(user)
     st.sidebar.metric("💰 Votre solde", f"{balance:.2f} KC")
 
-    # --- FORMULAIRE DE VENTE ---
-    with st.expander("➕ Publier une offre (Service ou Produit)"):
-        title = st.text_input("Titre de l'annonce")
-        desc = st.text_area("Description du service")
-        price = st.number_input("Prix en Kongo_Coins (KC)", min_value=1.0, step=1.0)
-
+    with st.expander("➕ Publier une offre"):
+        title = st.text_input("Titre")
+        desc = st.text_area("Description")
+        price = st.number_input("Prix (KC)", min_value=1.0, step=1.0)
         if st.button("Mettre en vente"):
-            data = {
+            supabase.table("marketplace_listings").insert({
                 "username": user,
                 "title": title,
                 "description": desc,
                 "price_kc": price,
                 "is_active": True
-            }
-            supabase.table("marketplace_listings").insert(data).execute()
-            st.success("Annonce propulsée sur le réseau !")
+            }).execute()
+            st.success("Annonce publiée !")
             update_activity()
             st.rerun()
 
     st.divider()
 
-    # --- AFFICHAGE TRIÉ PAR TST ---
-    # Récupérer toutes les annonces actives
     resp = supabase.table("marketplace_listings").select("*").eq("is_active", True).execute()
     listings = resp.data if resp.data else []
-
-    # Enrichir chaque annonce avec le phi_c du vendeur
     for item in listings:
         params = get_user_params(item['username'])
         item['phi_c'] = params['phi_c']
-
-    # Tri par phi_c décroissant
     listings.sort(key=lambda x: x['phi_c'], reverse=True)
 
     for item in listings:
@@ -740,48 +690,41 @@ def marketplace():
             with col_buy:
                 st.markdown(f"### {item['price_kc']} KC")
                 if st.button("Acheter", key=f"buy_{item['id']}"):
-                    # Logique de transaction avec taxe de 10% pour SCARABBE
                     seller = item['username']
-                    buyer = user
                     price = item['price_kc']
                     taxe = price * 0.10
-
-                    if buyer == seller:
+                    if user == seller:
                         st.error("Vous ne pouvez pas acheter votre propre offre.")
-                    elif update_wallet(buyer, price, "subtract"):
-                        # Verser au vendeur (moins la taxe) et taxe à SCARABBE
+                    elif update_wallet(user, price, "subtract"):
                         update_wallet(seller, price - taxe, "add")
                         update_wallet("SCARABBE", taxe, "add")
-                        # Désactiver l'annonce après achat
                         supabase.table("marketplace_listings").update({"is_active": False}).eq("id", item['id']).execute()
-                        st.success(f"Achat réussi ! {taxe:.2f} KC de taxe de stabilité prélevés.")
+                        st.success(f"Achat réussi ! Taxe de {taxe:.2f} KC prélevée.")
                         st.rerun()
                     else:
                         st.error("Solde insuffisant.")
             st.divider()
 
 # =====================================================
-# ADMIN PANEL (ENRICHIE)
+# ADMIN PANEL
 # =====================================================
 def admin_panel():
-    # Sécurité : double vérification
     admin_email_hash = hashlib.sha256("mayombochristal@gmail.com".encode()).hexdigest()
     admin_pass_hash = hashlib.sha256("Broozy040200".encode()).hexdigest()
 
     if st.session_state.user != "SCARABBE":
-        st.error("⚠️ Accès restreint. Seul le Maître des Attracteurs peut accéder à cette zone.")
+        st.error("⚠️ Accès restreint.")
         return
 
-    st.title("🛡️ Administration Centrale TTU-MC³ & TST")
+    st.title("🛡️ Administration Centrale TTU-MC³")
     st.markdown("---")
 
-    # Authentification supplémentaire
-    with st.expander("🔑 Authentification Administrateur (obligatoire)"):
-        email_input = st.text_input("Email", type="default")
+    with st.expander("🔑 Authentification supplémentaire"):
+        email_input = st.text_input("Email")
         pass_input = st.text_input("Mot de passe", type="password")
         if st.button("Vérifier"):
-            if hashlib.sha256(email_input.encode()).hexdigest() == admin_email_hash and \
-               hashlib.sha256(pass_input.encode()).hexdigest() == admin_pass_hash:
+            if (hashlib.sha256(email_input.encode()).hexdigest() == admin_email_hash and
+                hashlib.sha256(pass_input.encode()).hexdigest() == admin_pass_hash):
                 st.session_state.admin_auth = True
                 st.success("Accès autorisé.")
             else:
@@ -789,92 +732,73 @@ def admin_panel():
                 st.session_state.admin_auth = False
 
     if not st.session_state.get("admin_auth", False):
-        st.warning("Veuillez vous authentifier pour accéder aux réglages.")
+        st.warning("Authentification requise.")
         return
 
-    # --- STATISTIQUES DU MAÎTRE ---
     st.sidebar.markdown("---")
     st.sidebar.subheader("📊 Monitoring TST")
     mon_solde = get_wallet("SCARABBE")
-    st.sidebar.metric("Trésor de Stabilité", f"{mon_solde:.2f} KC")
+    st.sidebar.metric("Trésor", f"{mon_solde:.2f} KC")
 
-    if st.sidebar.button("🧹 Lancer la Dissipation (nettoyage)"):
-        # Supprime les posts de plus de 7 jours des utilisateurs Gratuit
+    if st.sidebar.button("🧹 Lancer la Dissipation"):
         cutoff = (datetime.now() - timedelta(days=7)).isoformat()
-        # Récupérer les utilisateurs Gratuit
         gratuit_users = supabase.table("subscriptions").select("username").eq("plan_type", "Gratuit").eq("is_active", True).execute()
         usernames = [u["username"] for u in gratuit_users.data] if gratuit_users.data else []
         if usernames:
             supabase.table("posts").delete().filter("username", "in", usernames).filter("created_at", "lt", cutoff).execute()
-        st.sidebar.success("Dissipation effectuée (posts anciens des gratuits supprimés).")
+        st.sidebar.success("Dissipation effectuée.")
 
-    # --- GESTION DES UTILISATEURS ---
     users_resp = supabase.table("profiles").select("username").execute()
     users_list = [u["username"] for u in users_resp.data] if users_resp.data else []
-
-    target_user = st.selectbox("Sélectionner un utilisateur pour modification spectrale :", users_list)
+    target_user = st.selectbox("Utilisateur", users_list)
 
     params = get_user_params(target_user)
     sub_info = get_user_plan(target_user)
 
     st.subheader(f"⚙️ Configuration de @{target_user}")
-
     col1, col2, col3 = st.columns(3)
     with col1:
-        new_m = st.number_input("Mémoire (Φm)", value=params["phi_m"], step=0.1)
+        new_m = st.number_input("Φm", value=params["phi_m"], step=0.1)
     with col2:
-        new_c = st.number_input("Cohérence (Φc)", value=params["phi_c"], step=0.1)
+        new_c = st.number_input("Φc", value=params["phi_c"], step=0.1)
     with col3:
-        new_d = st.number_input("Dissipation (Φd)", value=params["phi_d"], step=0.1)
+        new_d = st.number_input("Φd", value=params["phi_d"], step=0.1)
 
-    new_plan = st.selectbox("Attribuer un Forfait :", ["Gratuit", "Pro_Memoire", "Attracteur_Global"],
+    new_plan = st.selectbox("Forfait", ["Gratuit", "Pro_Memoire", "Attracteur_Global"],
                             index=["Gratuit", "Pro_Memoire", "Attracteur_Global"].index(sub_info["plan_type"]) if sub_info["plan_type"] in ["Gratuit", "Pro_Memoire", "Attracteur_Global"] else 0)
 
-    if st.button("🚀 Appliquer les Paramètres Dynamiques"):
-        supabase.table("tst_params").update({
-            "phi_m": new_m,
-            "phi_c": new_c,
-            "phi_d": new_d
-        }).eq("username", target_user).execute()
-
+    if st.button("🚀 Appliquer"):
+        supabase.table("tst_params").update({"phi_m": new_m, "phi_c": new_c, "phi_d": new_d}).eq("username", target_user).execute()
         expires = (datetime.now() + timedelta(days=30)).isoformat()
-        supabase.table("subscriptions").update({
-            "plan_type": new_plan,
-            "expires_at": expires
-        }).eq("username", target_user).execute()
-
-        st.success(f"Paramètres de @{target_user} synchronisés avec l'attracteur stable.")
+        supabase.table("subscriptions").update({"plan_type": new_plan, "expires_at": expires}).eq("username", target_user).execute()
+        st.success("Paramètres mis à jour.")
 
     st.divider()
-    st.subheader("💰 Récolte de la Taxe de Cohérence")
-    if st.button("Récolter la Taxe (1 KC à tous les forfaits actifs)"):
+    st.subheader("💰 Récolte de la Taxe")
+    if st.button("Récolter (1 KC par forfait actif)"):
         active_subs = supabase.table("subscriptions").select("username").eq("is_active", True).execute()
         count = 0
         for sub in active_subs.data:
             if update_wallet(sub['username'], 1, "subtract"):
                 credit_creator(1)
                 count += 1
-        st.success(f"Récolte terminée : {count} KC transférés vers votre compte Maître.")
+        st.success(f"{count} KC récoltés.")
 
-    # --- TABLEAU DE BORD DES REVENUS ---
     st.divider()
     st.header("💰 Trésor de SCARABBE")
     solde_maitre = get_wallet("SCARABBE")
-    st.metric("Total Kongo_Coins Collectés", f"{solde_maitre:,.2f} KC")
-    st.info("Ces jetons représentent la taxe de stabilité prélevée sur les transactions et les forfaits.")
-
-    # Simulation de retrait
-    st.subheader("Retrait des fonds")
-    amount_to_withdraw = st.number_input("Montant à convertir en FCFA", min_value=100, step=100)
-    if st.button("Demander le retrait (Orange/Moov Money)"):
-        st.warning("Demande envoyée au système de paiement (Simulation).")
+    st.metric("Total KC", f"{solde_maitre:,.2f} KC")
+    st.info("Taxes de stabilité et ventes de forfaits.")
+    amount = st.number_input("Montant à convertir en FCFA", min_value=100, step=100)
+    if st.button("Demander retrait (simulation)"):
+        st.warning("Demande envoyée (simulation).")
 
 # =====================================================
-# LABORATOIRE TST (inchangé)
+# LABORATOIRE TST
 # =====================================================
 def tst_laboratory():
     st.header("🔬 Laboratoire de Dynamique Triadique")
-    st.info("Visualisation en temps réel de la convergence du réseau vers son attracteur stable.")
+    st.info("Visualisation de la convergence vers l'attracteur.")
 
     def lorenz(x, y, z, s=10, r=28, b=2.667):
         x_dot = s*(y - x)
@@ -897,22 +821,17 @@ def tst_laboratory():
 
     fig = go.Figure(data=[go.Scatter3d(x=xs, y=ys, z=zs, mode='lines', line=dict(color='blue', width=1))])
     fig.update_layout(
-        title="Attracteur de Lorenz – Analogie de la stabilité sociale",
-        scene=dict(
-            xaxis_title="Mémoire (M)",
-            yaxis_title="Cohérence (C)",
-            zaxis_title="Dissipation (D)"
-        )
+        title="Attracteur de Lorenz",
+        scene=dict(xaxis_title="Mémoire (M)", yaxis_title="Cohérence (C)", zaxis_title="Dissipation (D)")
     )
     st.plotly_chart(fig)
 
     st.markdown("""
-    Cette visualisation illustre comment un système dynamique (comme votre réseau) peut converger vers des états stables (attracteurs) 
-    malgré des perturbations. Les paramètres sont issus de la **Théorie Spectrale Triadique** et du paradigme **TTU-MC³**.
+    Visualisation de la stabilité sociale selon la TST.
     """)
 
 # =====================================================
-# À PROPOS (inchangé)
+# À PROPOS
 # =====================================================
 def about():
     st.header("👤 Créateur & Vision Scientifique")
@@ -927,71 +846,41 @@ def about():
 
     with col2:
         st.markdown("""
-        ### **SCARABBE** *Fondateur de Free_Kogossa & Chercheur en Systèmes Dynamiques*
+        ### **SCARABBE** *Fondateur de Free_Kogossa & Chercheur*
 
-        Free_Kogossa n'est pas qu'un réseau social ; c'est le premier moteur social piloté par la **Théorie Spectrale Triadique (TST)**. 
-        Mon travail consiste à modéliser les interactions humaines non pas comme des données statiques, mais comme des flux d'énergie en quête de stabilité.
+        Free_Kogossa est le premier réseau social piloté par la **Théorie Spectrale Triadique (TST)**.
         """)
 
     st.divider()
-
     st.subheader("🔬 Le Moteur Théorique : TTU-MC³")
-
-    with st.expander("En savoir plus sur la science derrière Free_Kogossa"):
+    with st.expander("En savoir plus"):
         st.markdown("""
-        L'architecture de cette application repose sur le paradigme **TTU-MC³** (Mémoire, Cohérence, Dissipation). 
-        Contrairement aux algorithmes classiques, Free_Kogossa utilise :
-
-        * **Convergence vers l'Attracteur** : Vos flux d'actualités sont optimisés pour atteindre un état d'équilibre informationnel stable.
-        * **Stabilité de Lyapunov** : Pour garantir une modération organique et une robustesse face aux perturbations du réseau.
-        * **Énergie Dissipative** : Un système d'auto-scaling qui réduit l'empreinte numérique quand le système est au repos.
-
-        *Travaux basés sur la recherche doctorale : "Théorie Spectrale Triadique : Extension des systèmes dynamiques dissipatifs".*
+        * **Convergence vers l'Attracteur** : Vos flux sont optimisés pour atteindre un état d'équilibre.
+        * **Stabilité de Lyapunov** : Modération organique.
+        * **Énergie Dissipative** : Auto-scaling.
         """)
-
-        st.write("📊 **Simulation de Convergence Triadique**")
+        st.write("📊 **Simulation de Convergence**")
         t = np.linspace(0, 20, 200)
-        dampening = np.exp(-0.2 * t)
-        oscillation = np.cos(1.5 * t)
-        stability = dampening * oscillation
-        chart_data = pd.DataFrame({
-            "Temps (t)": t,
-            "Stabilité du Flux (Φ)": stability
-        }).set_index("Temps (t)")
-        st.line_chart(chart_data)
-        st.caption("Visualisation de la stabilisation d'un flux d'information après interaction.")
+        y = np.exp(-0.2 * t) * np.cos(1.5 * t)
+        st.line_chart(pd.DataFrame({"Stabilité": y}, index=t))
+        st.caption("Stabilisation d'un flux après interaction.")
 
-        st.markdown("### 📄 Documents de recherche")
+        st.markdown("### 📄 Documents")
         doc_path_pdf = os.path.join(ASSETS_FOLDER, "TST_Thesis.pdf")
-        doc_path_docx = os.path.join(ASSETS_FOLDER, "TST_Thesis.docx")
         if os.path.exists(doc_path_pdf):
             with open(doc_path_pdf, "rb") as f:
                 st.download_button("📥 Télécharger la thèse (PDF)", f, file_name="TST_Thesis.pdf")
-        if os.path.exists(doc_path_docx):
-            with open(doc_path_docx, "rb") as f:
-                st.download_button("📥 Télécharger la thèse (DOCX)", f, file_name="TST_Thesis.docx")
-        if not os.path.exists(doc_path_pdf) and not os.path.exists(doc_path_docx):
-            st.info("Les documents de recherche seront bientôt disponibles dans le dossier 'assets'.")
 
     st.divider()
-    st.header("🌟 Avantages de Free_Kogossa")
-
+    st.header("🌟 Avantages")
     col_a, col_b = st.columns(2)
     with col_a:
-        st.markdown("""
-        - 🔒 **Confidentialité** : Pas de pistage, pas de publicités ciblées.
-        - 🎙️ **Multi-modalité** : Audio, Vidéo et Texte intégrés.
-        - ⚡ **Algorithme Physique** : Une pertinence basée sur la TST.
-        """)
+        st.markdown("- 🔒 Confidentialité\n- 🎙️ Multi-modalité\n- ⚡ Algorithme Physique")
     with col_b:
-        st.markdown("""
-        - 🔄 **Stabilité Structurelle** : Une infrastructure résiliente.
-        - 📐 **Auto-scaling Énergétique** : Rafraîchissement adaptatif.
-        - 🧠 **Recherche intégrée** : Le réseau est un laboratoire vivant.
-        """)
+        st.markdown("- 🔄 Stabilité Structurelle\n- 📐 Auto-scaling\n- 🧠 Recherche intégrée")
 
     st.divider()
-    st.caption("Free_Kogossa – L'union de la science gabonaise et de la technologie cloud. © 2026")
+    st.caption("Free_Kogossa – Science gabonaise et technologie cloud. © 2026")
 
 # =====================================================
 # MAIN
