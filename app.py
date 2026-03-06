@@ -231,13 +231,18 @@ def get_user_params(username):
         return resp.data[0]
     return {"phi_m": 1.0, "phi_c": 1.0, "phi_d": 1.0}
 
+# --- GESTION DES LIKES (doit être avant calculate_post_score) ---
+def get_likes_count(post_id):
+    resp = supabase.table("likes").select("*", count="exact").eq("post_id", post_id).execute()
+    return resp.count if hasattr(resp, 'count') else len(resp.data)
+
 def calculate_post_score(post, params=None):
     """Calcule le score TST d'un post public."""
     if params is None:
         params = get_user_params(post["username"])
     created_at = datetime.fromisoformat(post["created_at"].replace("Z", "+00:00"))
     hours_old = (datetime.now().astimezone() - created_at).total_seconds() / 3600
-    likes = get_likes_count(post["id"])  # nécessite la fonction get_likes_count définie plus tard
+    likes = get_likes_count(post["id"])
     # Score = (Cohérence active) + (Inertie mémoire) - (Dissipation temporelle)
     score = (likes * params['phi_c']) + (params['phi_m'] * 10) - (hours_old * params['phi_d'])
     return score
@@ -413,12 +418,8 @@ def banner():
     st.divider()
 
 # =====================================================
-# GESTION DES LIKES
+# GESTION DES LIKES (suite)
 # =====================================================
-def get_likes_count(post_id):
-    resp = supabase.table("likes").select("*", count="exact").eq("post_id", post_id).execute()
-    return resp.count if hasattr(resp, 'count') else len(resp.data)
-
 def like_post(post_id, username):
     existing = supabase.table("likes").select("*").eq("post_id", post_id).eq("username", username).execute()
     if not existing.data:
@@ -565,7 +566,7 @@ def feed():
             st.divider()
 
 # =====================================================
-# MESSAGERIE
+# MESSAGERIE (avec gestion d'erreurs)
 # =====================================================
 
 @st.cache_data(ttl=300)
@@ -575,7 +576,7 @@ def get_other_users(current_user):
 
 def messenger():
     st_autorefresh(interval=get_refresh_interval(), key="msg_refresh")
-    perform_memory_cleanup()  # nettoyage périodique
+    perform_memory_cleanup()
     st.header("Messagerie")
 
     users_list = get_other_users(st.session_state.user)
@@ -596,22 +597,31 @@ def messenger():
     def load_messages(page=1, per_page=10):
         offset = (page - 1) * per_page
         filter_str = f"and(sender.eq.{st.session_state.user},recipient.eq.{target}),and(sender.eq.{target},recipient.eq.{st.session_state.user})"
-        resp = supabase.table("messages").select("*")\
-            .or_(filter_str)\
-            .order("created_at", desc=True)\
-            .range(offset, offset + per_page - 1)\
-            .execute()
-        messages = resp.data if resp.data else []
-        messages.reverse()
-        return messages
+        try:
+            resp = supabase.table("messages").select("*")\
+                .or_(filter_str)\
+                .order("created_at", desc=True)\
+                .range(offset, offset + per_page - 1)\
+                .execute()
+            messages = resp.data if resp.data else []
+            messages.reverse()
+            return messages
+        except Exception as e:
+            st.error(f"Erreur chargement messages : {e}")
+            return []
 
     messages = load_messages(st.session_state[conv_key])
 
-    if messages:
-        last_msg_time = datetime.fromisoformat(messages[-1]["created_at"].replace("Z", "+00:00"))
-        if st.session_state[last_seen_key] is None or last_msg_time > datetime.fromisoformat(st.session_state[last_seen_key]):
-            st.info("🔔 Nouveaux messages dans cette conversation")
-        st.session_state[last_seen_key] = messages[-1]["created_at"]
+    # Indicateur de nouveaux messages
+    try:
+        if messages:
+            last_msg_time = datetime.fromisoformat(messages[-1]["created_at"].replace("Z", "+00:00"))
+            last_seen = st.session_state.get(last_seen_key)
+            if last_seen is None or last_msg_time > datetime.fromisoformat(last_seen):
+                st.info("🔔 Nouveaux messages dans cette conversation")
+            st.session_state[last_seen_key] = messages[-1]["created_at"]
+    except Exception as e:
+        st.error(f"Erreur indicateur messages : {e}")
 
     for m in messages:
         if m["sender"] == st.session_state.user:
