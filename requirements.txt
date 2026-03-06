@@ -2,4 +2,6 @@ streamlit
 supabase
 streamlit-autorefresh
 streamlit-mic-recorder
+numpy
+pandas
 plotly
