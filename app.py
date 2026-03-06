@@ -60,7 +60,7 @@ def upload_to_storage(file_data, filename, content_type=None):
 if "user" not in st.session_state:
     st.session_state.user = None
 
-# --- NOUVEAU : Suivi de l'activité pour rafraîchissement adaptatif ---
+# --- Suivi de l'activité pour rafraîchissement adaptatif ---
 if "last_activity" not in st.session_state:
     st.session_state.last_activity = datetime.now()
 
@@ -135,7 +135,7 @@ def credit_creator(amount):
     """Crédite le wallet du créateur (SCARABBE) du montant spécifié."""
     update_wallet("SCARABBE", amount, "add")
 
-# --- NOUVEAU : S'assurer que SCARABBE a 1M KC ---
+# --- S'assurer que SCARABBE a 1M KC ---
 def ensure_scarabbe_wallet():
     """Si l'utilisateur est SCARABBE et que son wallet est à 0, on lui donne 1M KC."""
     if st.session_state.user == "SCARABBE":
@@ -164,7 +164,7 @@ def login():
                 if user_data["password"] == hash_password(password):
                     st.session_state.user = username
                     update_activity()
-                    ensure_scarabbe_wallet()   # ICI : on donne 1M à SCARABBE si nécessaire
+                    ensure_scarabbe_wallet()
                     st.rerun()
                 else:
                     st.error("Mot de passe incorrect")
@@ -236,7 +236,7 @@ def banner():
     st.divider()
 
 # =====================================================
-# NOUVEAU : CŒUR TST (calcul de stabilité)
+# CŒUR TST (calcul de stabilité)
 # =====================================================
 def calculate_stability(likes, comments, phi_m=1.0, phi_c=1.0, phi_d=1.0):
     """
@@ -253,13 +253,20 @@ def get_user_params(username):
     return {"phi_m": 1.0, "phi_c": 1.0, "phi_d": 1.0}
 
 # =====================================================
-# NOUVEAU : Gestion des likes
+# Gestion des likes (avec MINAGE)
 # =====================================================
 def like_post(post_id, username):
-    """Ajoute un like pour un post (table 'likes')."""
+    """Ajoute un like pour un post et récompense l'auteur."""
+    # Vérifier si déjà liké
     existing = supabase.table("likes").select("*").eq("post_id", post_id).eq("username", username).execute()
     if not existing.data:
         supabase.table("likes").insert({"post_id": post_id, "username": username}).execute()
+        # --- RÉCOMPENSE TST : l'auteur gagne 0.1 KC ---
+        post_author_resp = supabase.table("posts").select("username").eq("id", post_id).execute()
+        if post_author_resp.data:
+            author = post_author_resp.data[0]["username"]
+            update_wallet(author, 0.1, "add")
+        # ------------------------------------------------
         update_activity()
 
 def get_likes_count(post_id):
@@ -268,13 +275,37 @@ def get_likes_count(post_id):
     return resp.count if hasattr(resp, 'count') else len(resp.data)
 
 # =====================================================
-# FIL SOCIAL (AVEC SUPABASE STORAGE)
+# FIL SOCIAL AVEC TRI TST ET BADGES
 # =====================================================
+def get_tst_ranked_posts():
+    """Récupère et trie les posts selon l'algorithme TST."""
+    # On joint posts avec tst_params (nécessite une clé étrangère)
+    posts_resp = supabase.table("posts").select("*, tst_params(*)").order("created_at", desc=True).limit(50).execute()
+    posts = posts_resp.data if posts_resp.data else []
+
+    ranked_posts = []
+    now = datetime.now().astimezone()
+
+    for p in posts:
+        params = p.get('tst_params', {"phi_m": 1.0, "phi_c": 1.0, "phi_d": 1.0})
+        created_at = datetime.fromisoformat(p["created_at"].replace("Z", "+00:00"))
+        hours_old = (now - created_at).total_seconds() / 3600
+        likes = get_likes_count(p["id"])
+
+        # Score TST = (Cohérence active) + (Inertie mémoire) - (Dissipation temporelle)
+        score = (likes * params['phi_c']) + (params['phi_m'] * 10) - (hours_old * params['phi_d'])
+        p['tst_rank_score'] = score
+        ranked_posts.append(p)
+
+    ranked_posts.sort(key=lambda x: x['tst_rank_score'], reverse=True)
+    return ranked_posts
+
 def feed():
     st_autorefresh(interval=get_refresh_interval(), key="feed_refresh")
     banner()
     st.subheader("Exprime toi")
 
+    # Formulaire de publication
     text = st.text_area("Message")
     col_img, col_vid = st.columns(2)
     with col_img:
@@ -321,13 +352,26 @@ def feed():
         st.rerun()
 
     st.divider()
+    st.subheader("Fil d'actualité Triadique")
 
-    posts_response = supabase.table("posts").select("*").order("created_at", desc=True).limit(20).execute()
-    posts_list = posts_response.data if posts_response.data else []
+    # Affichage des posts triés
+    posts = get_tst_ranked_posts()
 
-    for post in posts_list:
+    for post in posts:
         with st.container():
-            st.subheader(f"@{post['username']}")
+            # Badge de stabilité
+            score = post.get('tst_rank_score', 0)
+            col_name, col_score = st.columns([3, 1])
+            with col_name:
+                st.markdown(f"### @{post['username']}")
+            with col_score:
+                if score > 50:
+                    st.markdown("🌟 **Attracteur Global**")
+                elif score > 20:
+                    st.markdown("🔥 **Stable**")
+                else:
+                    st.markdown(f"❄️ Score: {score:.1f}")
+
             st.write(post.get("text", ""))
 
             media_url = post.get("media_path", "")
@@ -341,19 +385,8 @@ def feed():
             created_at = datetime.fromisoformat(post["created_at"].replace("Z", "+00:00"))
             st.caption(created_at.strftime("%Y-%m-%d %H:%M"))
 
-            post_author = post["username"]
-            author_params = get_user_params(post_author)
+            # Likes et commentaires
             likes_count = get_likes_count(post["id"])
-            comments_response = supabase.table("comments").select("*", count="exact").eq("post_id", post["id"]).execute()
-            comments_count = comments_response.count if hasattr(comments_response, 'count') else len(comments_response.data)
-            stability = calculate_stability(likes_count, comments_count,
-                                            phi_m=author_params["phi_m"],
-                                            phi_c=author_params["phi_c"],
-                                            phi_d=author_params["phi_d"])
-            st.markdown(f"**Indice de Stabilité (TST) :** `{stability}`")
-            if stability > 5.0:
-                st.success("🔥 Ce post est un Attracteur Stable")
-
             col1, col2 = st.columns([1, 10])
             with col1:
                 if st.button("❤️", key=f"like_{post['id']}"):
@@ -383,7 +416,7 @@ def feed():
             st.divider()
 
 # =====================================================
-# MESSAGERIE (AVEC SUPABASE STORAGE)
+# MESSAGERIE (inchangée)
 # =====================================================
 def messenger():
     st_autorefresh(interval=get_refresh_interval(), key="msg_refresh")
@@ -509,7 +542,7 @@ def messenger():
             st.rerun()
 
 # =====================================================
-# PROFIL (AVEC SUPABASE STORAGE)
+# PROFIL (inchangé)
 # =====================================================
 def profile():
     user = st.session_state.user
@@ -586,7 +619,7 @@ def profile():
                 update_activity()
 
 # =====================================================
-# BOUTIQUE / FORFAITS
+# BOUTIQUE / FORFAITS (inchangé)
 # =====================================================
 def shop():
     st.header("🛒 Boutique des Forfaits Physiques")
@@ -647,59 +680,185 @@ def shop():
         st.rerun()
 
 # =====================================================
-# ADMIN PANEL (RÉSERVÉ À SCARABBE)
+# MARKETPLACE TRIADIQUE
+# =====================================================
+def marketplace():
+    st.header("🏪 Marketplace Free_Kogossa")
+    user = st.session_state.user
+    balance = get_wallet(user)
+    st.sidebar.metric("💰 Votre solde", f"{balance:.2f} KC")
+
+    # --- FORMULAIRE DE VENTE ---
+    with st.expander("➕ Publier une offre (Service ou Produit)"):
+        title = st.text_input("Titre de l'annonce")
+        desc = st.text_area("Description du service")
+        price = st.number_input("Prix en Kongo_Coins (KC)", min_value=1.0, step=1.0)
+
+        if st.button("Mettre en vente"):
+            data = {
+                "username": user,
+                "title": title,
+                "description": desc,
+                "price_kc": price,
+                "is_active": True
+            }
+            supabase.table("marketplace_listings").insert(data).execute()
+            st.success("Annonce propulsée sur le réseau !")
+            update_activity()
+            st.rerun()
+
+    st.divider()
+
+    # --- AFFICHAGE TRIÉ PAR TST ---
+    # On récupère les annonces jointes aux paramètres TST des vendeurs
+    resp = supabase.table("marketplace_listings").select("*, tst_params(phi_c)").eq("is_active", True).execute()
+    listings = resp.data if resp.data else []
+
+    # Tri : Priorité à ceux qui ont payé pour la Cohérence (phi_c)
+    listings.sort(key=lambda x: x['tst_params']['phi_c'] if x['tst_params'] else 1.0, reverse=True)
+
+    for item in listings:
+        with st.container():
+            col_info, col_buy = st.columns([3, 1])
+            with col_info:
+                st.subheader(item['title'])
+                st.write(item['description'])
+                phi = item['tst_params']['phi_c'] if item['tst_params'] else 1.0
+                st.caption(f"Vendeur : @{item['username']} | Visibilité : {phi}x")
+            with col_buy:
+                st.markdown(f"### {item['price_kc']} KC")
+                if st.button("Acheter", key=f"buy_{item['id']}"):
+                    # Logique de transaction avec taxe de 10% pour SCARABBE
+                    seller = item['username']
+                    buyer = user
+                    price = item['price_kc']
+                    taxe = price * 0.10
+
+                    if buyer == seller:
+                        st.error("Vous ne pouvez pas acheter votre propre offre.")
+                    elif update_wallet(buyer, price, "subtract"):
+                        # Verser au vendeur (moins la taxe) et taxe à SCARABBE
+                        update_wallet(seller, price - taxe, "add")
+                        update_wallet("SCARABBE", taxe, "add")
+                        # Désactiver l'annonce après achat
+                        supabase.table("marketplace_listings").update({"is_active": False}).eq("id", item['id']).execute()
+                        st.success(f"Achat réussi ! {taxe:.2f} KC de taxe de stabilité prélevés.")
+                        st.rerun()
+                    else:
+                        st.error("Solde insuffisant.")
+            st.divider()
+
+# =====================================================
+# ADMIN PANEL (ENRICHIE)
 # =====================================================
 def admin_panel():
+    # Sécurité : double vérification
+    admin_email_hash = hashlib.sha256("mayombochristal@gmail.com".encode()).hexdigest()
+    admin_pass_hash = hashlib.sha256("Broozy040200".encode()).hexdigest()
+
     if st.session_state.user != "SCARABBE":
-        st.error("Accès non autorisé.")
+        st.error("⚠️ Accès restreint. Seul le Maître des Attracteurs peut accéder à cette zone.")
         return
 
-    st.title("🛡️ Administration Centrale TTU-MC³")
-    st.success("Accès Maître des Attracteurs validé.")
+    st.title("🛡️ Administration Centrale TTU-MC³ & TST")
+    st.markdown("---")
 
+    # Authentification supplémentaire
+    with st.expander("🔑 Authentification Administrateur (obligatoire)"):
+        email_input = st.text_input("Email", type="default")
+        pass_input = st.text_input("Mot de passe", type="password")
+        if st.button("Vérifier"):
+            if hashlib.sha256(email_input.encode()).hexdigest() == admin_email_hash and \
+               hashlib.sha256(pass_input.encode()).hexdigest() == admin_pass_hash:
+                st.session_state.admin_auth = True
+                st.success("Accès autorisé.")
+            else:
+                st.error("Identifiants incorrects.")
+                st.session_state.admin_auth = False
+
+    if not st.session_state.get("admin_auth", False):
+        st.warning("Veuillez vous authentifier pour accéder aux réglages.")
+        return
+
+    # --- STATISTIQUES DU MAÎTRE ---
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("📊 Monitoring TST")
+    mon_solde = get_wallet("SCARABBE")
+    st.sidebar.metric("Trésor de Stabilité", f"{mon_solde:.2f} KC")
+
+    if st.sidebar.button("🧹 Lancer la Dissipation (nettoyage)"):
+        # Supprime les posts de plus de 7 jours des utilisateurs Gratuit
+        cutoff = (datetime.now() - timedelta(days=7)).isoformat()
+        # Récupérer les utilisateurs Gratuit
+        gratuit_users = supabase.table("subscriptions").select("username").eq("plan_type", "Gratuit").eq("is_active", True).execute()
+        usernames = [u["username"] for u in gratuit_users.data] if gratuit_users.data else []
+        if usernames:
+            supabase.table("posts").delete().filter("username", "in", usernames).filter("created_at", "lt", cutoff).execute()
+        st.sidebar.success("Dissipation effectuée (posts anciens des gratuits supprimés).")
+
+    # --- GESTION DES UTILISATEURS ---
     users_resp = supabase.table("profiles").select("username").execute()
     users_list = [u["username"] for u in users_resp.data] if users_resp.data else []
 
-    target_user = st.selectbox("Choisir un utilisateur à configurer", users_list)
+    target_user = st.selectbox("Sélectionner un utilisateur pour modification spectrale :", users_list)
 
     params = get_user_params(target_user)
     sub_info = get_user_plan(target_user)
 
-    st.subheader(f"Réglages Physiques pour @{target_user}")
-    st.write(f"Forfait actuel : {sub_info['plan_type']}")
+    st.subheader(f"⚙️ Configuration de @{target_user}")
 
     col1, col2, col3 = st.columns(3)
     with col1:
-        new_phi_m = st.slider("Coefficient Mémoire (Φm)", 0.1, 5.0, params["phi_m"])
+        new_m = st.number_input("Mémoire (Φm)", value=params["phi_m"], step=0.1)
     with col2:
-        new_phi_c = st.slider("Cohérence / Visibilité (Φc)", 0.1, 10.0, params["phi_c"])
+        new_c = st.number_input("Cohérence (Φc)", value=params["phi_c"], step=0.1)
     with col3:
-        new_phi_d = st.slider("Taux de Dissipation (Φd)", 0.01, 2.0, params["phi_d"])
+        new_d = st.number_input("Dissipation (Φd)", value=params["phi_d"], step=0.1)
 
-    new_plan = st.selectbox("Forfait", ["Gratuit", "Pro_Memoire", "Attracteur_Global"],
-                            index=["Gratuit", "Pro_Memoire", "Attracteur_Global"].index(sub_info['plan_type']) if sub_info['plan_type'] in ["Gratuit", "Pro_Memoire", "Attracteur_Global"] else 0)
+    new_plan = st.selectbox("Attribuer un Forfait :", ["Gratuit", "Pro_Memoire", "Attracteur_Global"],
+                            index=["Gratuit", "Pro_Memoire", "Attracteur_Global"].index(sub_info["plan_type"]) if sub_info["plan_type"] in ["Gratuit", "Pro_Memoire", "Attracteur_Global"] else 0)
 
-    if st.button("Appliquer les modifications TTU-MC³"):
+    if st.button("🚀 Appliquer les Paramètres Dynamiques"):
         supabase.table("tst_params").update({
-            "phi_m": new_phi_m,
-            "phi_c": new_phi_c,
-            "phi_d": new_phi_d
+            "phi_m": new_m,
+            "phi_c": new_c,
+            "phi_d": new_d
         }).eq("username", target_user).execute()
 
-        if new_plan != sub_info['plan_type']:
-            supabase.table("subscriptions").delete().eq("username", target_user).execute()
-            supabase.table("subscriptions").insert({
-                "username": target_user,
-                "plan_type": new_plan,
-                "activated_at": datetime.now().isoformat(),
-                "expires_at": (datetime.now() + timedelta(days=30)).isoformat(),
-                "is_active": True
-            }).execute()
+        expires = (datetime.now() + timedelta(days=30)).isoformat()
+        supabase.table("subscriptions").update({
+            "plan_type": new_plan,
+            "expires_at": expires
+        }).eq("username", target_user).execute()
 
-        st.success("Système dynamique mis à jour avec succès.")
+        st.success(f"Paramètres de @{target_user} synchronisés avec l'attracteur stable.")
+
+    st.divider()
+    st.subheader("💰 Récolte de la Taxe de Cohérence")
+    if st.button("Récolter la Taxe (1 KC à tous les forfaits actifs)"):
+        active_subs = supabase.table("subscriptions").select("username").eq("is_active", True).execute()
+        count = 0
+        for sub in active_subs.data:
+            if update_wallet(sub['username'], 1, "subtract"):
+                credit_creator(1)
+                count += 1
+        st.success(f"Récolte terminée : {count} KC transférés vers votre compte Maître.")
+
+    # --- TABLEAU DE BORD DES REVENUS ---
+    st.divider()
+    st.header("💰 Trésor de SCARABBE")
+    solde_maitre = get_wallet("SCARABBE")
+    st.metric("Total Kongo_Coins Collectés", f"{solde_maitre:,.2f} KC")
+    st.info("Ces jetons représentent la taxe de stabilité prélevée sur les transactions et les forfaits.")
+
+    # Simulation de retrait
+    st.subheader("Retrait des fonds")
+    amount_to_withdraw = st.number_input("Montant à convertir en FCFA", min_value=100, step=100)
+    if st.button("Demander le retrait (Orange/Moov Money)"):
+        st.warning("Demande envoyée au système de paiement (Simulation).")
 
 # =====================================================
-# LABORATOIRE TST (visualisation 3D)
+# LABORATOIRE TST (inchangé)
 # =====================================================
 def tst_laboratory():
     st.header("🔬 Laboratoire de Dynamique Triadique")
@@ -741,7 +900,7 @@ def tst_laboratory():
     """)
 
 # =====================================================
-# À PROPOS / CRÉATEUR (VERSION ENRICHIE)
+# À PROPOS (inchangé)
 # =====================================================
 def about():
     st.header("👤 Créateur & Vision Scientifique")
@@ -832,7 +991,7 @@ else:
     kc_balance = get_wallet(st.session_state.user)
     st.sidebar.metric("💰 Kongo Coins", f"{kc_balance:.2f} KC")
 
-    menu_options = ["Fil social", "Messagerie", "Profil", "Boutique", "Laboratoire TST", "À propos / Créateur"]
+    menu_options = ["Fil social", "Messagerie", "Profil", "Boutique", "Marketplace", "Laboratoire TST", "À propos / Créateur"]
     if st.session_state.user == "SCARABBE":
         menu_options.append("Administration")
 
@@ -840,6 +999,8 @@ else:
 
     if st.sidebar.button("Déconnexion"):
         st.session_state.user = None
+        if "admin_auth" in st.session_state:
+            del st.session_state.admin_auth
         st.rerun()
 
     if page == "Fil social":
@@ -850,6 +1011,8 @@ else:
         profile()
     elif page == "Boutique":
         shop()
+    elif page == "Marketplace":
+        marketplace()
     elif page == "Laboratoire TST":
         tst_laboratory()
     elif page == "À propos / Créateur":
