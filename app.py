@@ -66,11 +66,11 @@ def update_activity():
 def get_refresh_interval():
     idle = (datetime.now() - st.session_state.last_activity).seconds
     if idle < 60:
-        return 2000
+        return 5000      # 5 sec (actif)
     elif idle < 300:
-        return 5000
+        return 10000     # 10 sec (inactif modéré)
     else:
-        return 10000
+        return 20000     # 20 sec (inactif)
 # ------------------------------------------------------------
 
 # =====================================================
@@ -421,34 +421,53 @@ def feed():
             st.divider()
 
 # =====================================================
-# MESSAGERIE
+# MESSAGERIE OPTIMISÉE (PAGINATION 10 MESSAGES)
 # =====================================================
+
+@st.cache_data(ttl=300)  # Cache de 5 minutes
+def get_other_users(current_user):
+    """Retourne la liste des autres utilisateurs (mise en cache)."""
+    resp = supabase.table("profiles").select("username").neq("username", current_user).execute()
+    return [u["username"] for u in resp.data] if resp.data else []
+
 def messenger():
     st_autorefresh(interval=get_refresh_interval(), key="msg_refresh")
     st.header("Messagerie")
 
-    users_response = supabase.table("profiles").select("username").neq("username", st.session_state.user).execute()
-    users_list = [u["username"] for u in users_response.data] if users_response.data else []
+    # Récupérer les autres utilisateurs (avec cache)
+    users_list = get_other_users(st.session_state.user)
     if not users_list:
         st.info("Aucun autre utilisateur")
         return
 
+    # Sélection du destinataire
     target = st.selectbox("Choisir utilisateur", users_list, key="msg_target")
 
-    from_user = st.session_state.user
-    messages_response = supabase.table("messages").select("*")\
-        .or_(f"sender.eq.{from_user},recipient.eq.{from_user}")\
-        .or_(f"sender.eq.{target},recipient.eq.{target}")\
-        .order("created_at").execute()
-    all_msgs = messages_response.data if messages_response.data else []
-    filtered_msgs = [
-        m for m in all_msgs
-        if (m["sender"] == from_user and m["recipient"] == target) or
-           (m["sender"] == target and m["recipient"] == from_user)
-    ]
-    filtered_msgs.sort(key=lambda x: x["created_at"])
+    # Gestion de la pagination propre à chaque conversation
+    conv_key = f"page_{st.session_state.user}_{target}"
+    if conv_key not in st.session_state:
+        st.session_state[conv_key] = 1  # page courante (1 = plus récents)
 
-    for m in filtered_msgs:
+    # Fonction pour charger les messages de la conversation (par pages de 10)
+    def load_messages(page=1, per_page=10):
+        offset = (page - 1) * per_page
+        # Construire le filtre : (sender=moi et recipient=target) OU (sender=target et recipient=moi)
+        filter_str = f"and(sender.eq.{st.session_state.user},recipient.eq.{target}),and(sender.eq.{target},recipient.eq.{st.session_state.user})"
+        resp = supabase.table("messages").select("*")\
+            .or_(filter_str)\
+            .order("created_at", desc=True)\
+            .range(offset, offset + per_page - 1)\
+            .execute()
+        messages = resp.data if resp.data else []
+        # Inverser pour avoir l'ordre chronologique (plus ancien en premier dans l'affichage)
+        messages.reverse()
+        return messages
+
+    # Charger les messages de la page courante
+    messages = load_messages(st.session_state[conv_key])
+
+    # Afficher les messages
+    for m in messages:
         if m["sender"] == st.session_state.user:
             prefix = "🟢 **Moi** : "
         else:
@@ -462,6 +481,19 @@ def messenger():
             st.video(m["video_path"])
         else:
             st.write(prefix + m.get("text", ""))
+
+    # Bouton pour charger plus anciens
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        # Vérifier s'il y a encore des messages à charger (on regarde si on a reçu exactement 10 messages)
+        if len(messages) == 10:
+            if st.button("📜 Messages plus anciens"):
+                st.session_state[conv_key] += 1
+                st.rerun()
+        elif st.session_state[conv_key] > 1:
+            if st.button("⬆️ Revenir aux messages récents"):
+                st.session_state[conv_key] = 1
+                st.rerun()
 
     st.divider()
     st.subheader("Nouveau message")
@@ -538,6 +570,10 @@ def messenger():
 
         if upload_success:
             supabase.table("messages").insert(message_dict).execute()
+            # Réinitialiser la page pour voir le nouveau message
+            st.session_state[conv_key] = 1
+            # Vider le cache des utilisateurs (pas nécessaire, mais on peut)
+            get_other_users.clear()
             update_activity()
             st.rerun()
 
@@ -734,7 +770,7 @@ def marketplace():
             st.divider()
 
 # =====================================================
-# ADMIN PANEL
+# ADMIN PANEL (avec dissipation des messages)
 # =====================================================
 def admin_panel():
     admin_email_hash = hashlib.sha256("mayombochristal@gmail.com".encode()).hexdigest()
@@ -768,13 +804,22 @@ def admin_panel():
     mon_solde = get_wallet("SCARABBE")
     st.sidebar.metric("Trésor", f"{mon_solde:.2f} KC")
 
-    if st.sidebar.button("🧹 Lancer la Dissipation"):
+    if st.sidebar.button("🧹 Lancer la Dissipation (posts anciens)"):
         cutoff = (datetime.now() - timedelta(days=7)).isoformat()
         gratuit_users = supabase.table("subscriptions").select("username").eq("plan_type", "Gratuit").eq("is_active", True).execute()
         usernames = [u["username"] for u in gratuit_users.data] if gratuit_users.data else []
         if usernames:
             supabase.table("posts").delete().filter("username", "in", usernames).filter("created_at", "lt", cutoff).execute()
-        st.sidebar.success("Dissipation effectuée.")
+        st.sidebar.success("Dissipation effectuée (posts gratuits >7j).")
+
+    # Nouvelle fonction de dissipation des messages
+    if st.sidebar.button("🗑️ Dissipation des messages (30 jours)"):
+        cutoff = (datetime.now() - timedelta(days=30)).isoformat()
+        try:
+            supabase.table("messages").delete().lt("created_at", cutoff).execute()
+            st.sidebar.success("Messages de plus de 30 jours supprimés.")
+        except Exception as e:
+            st.sidebar.error(f"Erreur : {e}")
 
     users_resp = supabase.table("profiles").select("username").execute()
     users_list = [u["username"] for u in users_resp.data] if users_resp.data else []
