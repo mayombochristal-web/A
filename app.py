@@ -526,36 +526,6 @@ def feed():
             except Exception as e:
                 st.error(f"Erreur : {e}")
 
-    if st.button("Publier"):
-        media_url = ""
-        media_type = None
-        if img:
-            ext = img.name.split('.')[-1]
-            filename = f"post_img_{st.session_state.user}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{ext}"
-            media_url = upload_to_storage(img.getvalue(), filename, img.type)
-            if not media_url:
-                st.error("L'image n'a pas pu être uploadée.")
-                st.stop()
-            media_type = "image"
-        elif video:
-            ext = video.name.split('.')[-1]
-            filename = f"post_vid_{st.session_state.user}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{ext}"
-            media_url = upload_to_storage(video.getvalue(), filename, video.type)
-            if not media_url:
-                st.error("La vidéo n'a pas pu être uploadée.")
-                st.stop()
-            media_type = "video"
-
-        post_dict = {
-            "username": st.session_state.user,
-            "text": text,
-            "media_path": media_url,
-            "media_type": media_type,
-        }
-        supabase.table("posts").insert(post_dict).execute()
-        update_activity()
-        st.rerun()
-
     st.divider()
     st.subheader("Fil d'actualité Triadique")
 
