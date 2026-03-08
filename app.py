@@ -457,23 +457,81 @@ def get_tst_ranked_posts():
 
 def feed():
     st_autorefresh(interval=get_refresh_interval(), key="feed_refresh")
-    perform_memory_cleanup()  # nettoyage périodique
+    perform_memory_cleanup()  # Nettoyage périodique TST
     banner()
-    st.subheader("Exprime toi")
+    st.subheader("Exprime-toi")
 
-    text = st.text_area("Message")
+    # 1. Zone de saisie de texte
+    text = st.text_area("Message", placeholder="Quoi de neuf ?")
+
+    # 2. Zone de médias (Image, Vidéo, Audio)
     col_img, col_vid = st.columns(2)
     with col_img:
         img = st.file_uploader("Image", type=["png", "jpg", "jpeg"], key="feed_img")
     with col_vid:
         video = st.file_uploader("Vidéo", type=["mp4", "mov", "avi", "mkv"], key="feed_video")
 
+    st.write("🎙️ Message Vocal")
+    audio_data = mic_recorder(
+        start_prompt="Démarrer l'enregistrement", 
+        stop_prompt="Arrêter & Valider", 
+        key='feed_recorder'
+    )
+    
+    if audio_data:
+        st.audio(audio_data['bytes'])
+
+    # 3. Vérification des limites de taille (50 Mo max pour Supabase)
     if img and img.size > 50 * 1024 * 1024:
         st.error("Cette image est trop lourde (max 50 Mo)")
         st.stop()
     if video and video.size > 50 * 1024 * 1024:
-        st.error("Cette vidéo dépasse la limite de 50 Mo de Supabase")
+        st.error("Cette vidéo dépasse la limite de 50 Mo")
         st.stop()
+
+    # 4. Bouton de publication et Logique Cloud
+    if st.button("Publier"):
+        if not text and not img and not video and not audio_data:
+            st.warning("Ton post est vide !")
+            return
+
+        with st.spinner("Publication en cours sur le Cloud..."):
+            media_url = ""
+            audio_url = ""
+            video_url = ""
+
+            # Upload Image
+            if img:
+                filename = f"img_{st.session_state.user}_{datetime.now().timestamp()}.jpg"
+                media_url = upload_to_storage(img.getvalue(), filename, img.type)
+
+            # Upload Vidéo
+            if video:
+                filename = f"vid_{st.session_state.user}_{datetime.now().timestamp()}.mp4"
+                video_url = upload_to_storage(video.getvalue(), filename, video.type)
+
+            # Upload Audio (Vocal)
+            if audio_data:
+                filename = f"audio_{st.session_state.user}_{datetime.now().timestamp()}.wav"
+                audio_url = upload_to_storage(audio_data['bytes'], filename, "audio/wav")
+
+            # Insertion dans la table Supabase
+            post_data = {
+                "username": st.session_state.user,
+                "text": text,
+                "media_url": media_url,    # URL de l'image
+                "video_url": video_url,    # Assure-toi que cette colonne existe en DB
+                "audio_url": audio_url,    # Assure-toi que cette colonne existe en DB
+                "created_at": datetime.now().isoformat()
+            }
+
+            try:
+                supabase.table("posts").insert(post_data).execute()
+                st.success("Post publié avec succès !")
+                update_activity()
+                st.rerun()
+            except Exception as e:
+                st.error(f"Erreur lors de la publication : {e}")
 
     if st.button("Publier"):
         media_url = ""
