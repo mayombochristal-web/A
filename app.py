@@ -440,98 +440,91 @@ def like_post(post_id, username):
 # FIL SOCIAL
 # =====================================================
 def get_tst_ranked_posts():
-    posts_resp = supabase.table("posts").select("*, tst_params(*)").order("created_at", desc=True).limit(50).execute()
-    posts = posts_resp.data if posts_resp.data else []
-    ranked_posts = []
-    now = datetime.now().astimezone()
-    for p in posts:
-        params = p.get('tst_params', {"phi_m": 1.0, "phi_c": 1.0, "phi_d": 1.0})
-        created_at = datetime.fromisoformat(p["created_at"].replace("Z", "+00:00"))
-        hours_old = (now - created_at).total_seconds() / 3600
-        likes = get_likes_count(p["id"])
-        score = (likes * params['phi_c']) + (params['phi_m'] * 10) - (hours_old * params['phi_d'])
-        p['tst_rank_score'] = score
-        ranked_posts.append(p)
-    ranked_posts.sort(key=lambda x: x['tst_rank_score'], reverse=True)
-    return ranked_posts
+    try:
+        posts_resp = supabase.table("posts").select("*, tst_params(*)").order("created_at", desc=True).limit(50).execute()
+        posts = posts_resp.data if posts_resp.data else []
+        ranked_posts = []
+        now = datetime.now().astimezone()
+        for p in posts:
+            params = p.get('tst_params', {"phi_m": 1.0, "phi_c": 1.0, "phi_d": 1.0})
+            created_at = datetime.fromisoformat(p["created_at"].replace("Z", "+00:00"))
+            hours_old = (now - created_at).total_seconds() / 3600
+            likes = get_likes_count(p["id"])
+            score = (likes * params['phi_c']) + (params['phi_m'] * 10) - (hours_old * params['phi_d'])
+            p['tst_rank_score'] = score
+            ranked_posts.append(p)
+        ranked_posts.sort(key=lambda x: x['tst_rank_score'], reverse=True)
+        return ranked_posts
+    except Exception as e:
+        st.error(f"Erreur classement TST : {e}")
+        return []
 
 def feed():
     st_autorefresh(interval=get_refresh_interval(), key="feed_refresh")
-    perform_memory_cleanup()  # Nettoyage périodique TST
+    perform_memory_cleanup()
     banner()
     st.subheader("Exprime-toi")
 
-    # 1. Zone de saisie de texte
-    text = st.text_area("Message", placeholder="Quoi de neuf ?")
+    # 1. Zone de texte
+    text = st.text_area("Message", placeholder="Quoi de neuf ?", key="main_feed_text")
 
-    # 2. Zone de médias (Image, Vidéo, Audio)
+    # 2. Zone de médias
     col_img, col_vid = st.columns(2)
     with col_img:
         img = st.file_uploader("Image", type=["png", "jpg", "jpeg"], key="feed_img")
     with col_vid:
         video = st.file_uploader("Vidéo", type=["mp4", "mov", "avi", "mkv"], key="feed_video")
 
+    # 3. Micro (Remplace audio_input qui bug)
     st.write("🎙️ Message Vocal")
     audio_data = mic_recorder(
         start_prompt="Démarrer l'enregistrement", 
         stop_prompt="Arrêter & Valider", 
         key='feed_recorder'
     )
-    
+
     if audio_data:
         st.audio(audio_data['bytes'])
 
-    # 3. Vérification des limites de taille (50 Mo max pour Supabase)
+    # Vérification taille
     if img and img.size > 50 * 1024 * 1024:
-        st.error("Cette image est trop lourde (max 50 Mo)")
+        st.error("Image trop lourde (max 50 Mo)")
         st.stop()
     if video and video.size > 50 * 1024 * 1024:
-        st.error("Cette vidéo dépasse la limite de 50 Mo")
+        st.error("Vidéo trop lourde (max 50 Mo)")
         st.stop()
 
-    # 4. Bouton de publication et Logique Cloud
-    if st.button("Publier"):
+    # 4. Bouton de publication unique
+    if st.button("Publier", key="btn_publier_main"):
         if not text and not img and not video and not audio_data:
             st.warning("Ton post est vide !")
             return
 
-        with st.spinner("Publication en cours sur le Cloud..."):
-            media_url = ""
-            audio_url = ""
-            video_url = ""
+        with st.spinner("Publication en cours..."):
+            media_url, audio_url, video_url = "", "", ""
 
-            # Upload Image
             if img:
-                filename = f"img_{st.session_state.user}_{datetime.now().timestamp()}.jpg"
-                media_url = upload_to_storage(img.getvalue(), filename, img.type)
-
-            # Upload Vidéo
+                media_url = upload_to_storage(img.getvalue(), f"img_{datetime.now().timestamp()}.jpg", img.type)
             if video:
-                filename = f"vid_{st.session_state.user}_{datetime.now().timestamp()}.mp4"
-                video_url = upload_to_storage(video.getvalue(), filename, video.type)
-
-            # Upload Audio (Vocal)
+                video_url = upload_to_storage(video.getvalue(), f"vid_{datetime.now().timestamp()}.mp4", video.type)
             if audio_data:
-                filename = f"audio_{st.session_state.user}_{datetime.now().timestamp()}.wav"
-                audio_url = upload_to_storage(audio_data['bytes'], filename, "audio/wav")
+                audio_url = upload_to_storage(audio_data['bytes'], f"vocal_{datetime.now().timestamp()}.wav", "audio/wav")
 
-            # Insertion dans la table Supabase
             post_data = {
                 "username": st.session_state.user,
                 "text": text,
-                "media_url": media_url,    # URL de l'image
-                "video_url": video_url,    # Assure-toi que cette colonne existe en DB
-                "audio_url": audio_url,    # Assure-toi que cette colonne existe en DB
+                "media_url": media_url,
+                "video_url": video_url,
+                "audio_url": audio_url,
                 "created_at": datetime.now().isoformat()
             }
 
             try:
                 supabase.table("posts").insert(post_data).execute()
-                st.success("Post publié avec succès !")
-                update_activity()
+                st.success("Post publié !")
                 st.rerun()
             except Exception as e:
-                st.error(f"Erreur lors de la publication : {e}")
+                st.error(f"Erreur : {e}")
 
     if st.button("Publier"):
         media_url = ""
